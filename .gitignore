@@ -1,0 +1,8 @@
+node_modules/
+.netlify/
+.env
+.env.*
+.DS_Store
+work/
+supabase/discover-initial.json
+supabase/discover-initial.sql
