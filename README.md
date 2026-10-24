@@ -63,15 +63,15 @@ Deploy. Netlify will give you one public URL to share.
 
 The current site was deployed with the Netlify CLI and is not connected to a Git repository. After linking this folder to the existing Netlify project, publish updates with `netlify deploy --prod --dir=public --functions=netlify/functions --context production`.
 
+### 3. Use it
+
+Open the URL → choose **Garima** or **Indresh** → paste a job link → save.
+
 ## Version control
 
 The first Git version is the current working app (`v1.0.0`). Earlier V1, dashboard, and Discover changes are summarized in [CHANGELOG.md](CHANGELOG.md); they were built before Git tracking began and therefore do not have individual historical commits.
 
 For each future change, update `CHANGELOG.md`, run `node --test tests/*.test.cjs`, then commit and push the code. Give each release a version in `package.json` and a matching Git tag (for example, `v1.1.0`). The repository is separate from the live Netlify site until Git-based deployment is connected there; pushing a commit alone does not change the public app.
-
-### 3. Use it
-
-Open the URL → choose **Garima** or **Indresh** → paste a job link → save.
 
 ## Notes about parsing
 
