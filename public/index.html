@@ -54,6 +54,50 @@
     </div>
   </div>
 
+  <!-- Track a company -->
+  <div id="companyModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="companyModalTitle">
+    <form id="companyForm" class="modal company-modal" novalidate autocomplete="off">
+      <div class="modal-title-row">
+        <div>
+          <h2 id="companyModalTitle">Track a company</h2>
+          <p class="block-job-name">Keep the people you want to reach out to in one place.</p>
+        </div>
+        <button type="button" class="icon-btn" id="closeCompanyModal" aria-label="Close">×</button>
+      </div>
+
+      <label class="field"><span class="field-label">Company <span class="req">required</span></span>
+        <input id="companyName" type="text" maxlength="120" placeholder="e.g. Ramp" />
+      </label>
+
+      <div class="field">
+        <span class="field-label">Source</span>
+        <div class="reason-chips" id="companyChips">
+          <button type="button" class="reason-chip" data-source="LinkedIn">LinkedIn</button>
+          <button type="button" class="reason-chip" data-source="Referral">Referral</button>
+          <button type="button" class="reason-chip" data-source="Event">Event</button>
+          <button type="button" class="reason-chip" data-source="Career page">Career page</button>
+        </div>
+        <input id="companySource" type="text" maxlength="60" placeholder="Or type your own source" aria-label="Source" />
+      </div>
+
+      <div class="field">
+        <span class="field-label">People to reach out to <span class="opt">optional</span></span>
+        <div id="companyPeople" class="person-rows"></div>
+        <button type="button" id="addPersonRow" class="btn ghost small">+ Add another person</button>
+      </div>
+
+      <label class="field"><span class="field-label">Remarks <span class="opt">optional</span></span>
+        <textarea id="companyRemark" rows="3" maxlength="1000" placeholder="A post you saw, why this company, what to say first…"></textarea>
+      </label>
+
+      <div id="companyErr" class="form-err" role="alert"></div>
+      <div class="modal-actions">
+        <button type="button" class="btn secondary" id="cancelCompany">Cancel</button>
+        <button type="submit" class="btn primary" id="saveCompany">Track company</button>
+      </div>
+    </form>
+  </div>
+
   <header class="topbar">
     <div class="brand">
       <div class="logo-mark small">JS</div>
@@ -135,6 +179,7 @@
         <div class="tabs" role="tablist">
           <button class="tab active" role="tab" aria-selected="true" data-tab="open">To apply <span id="openCount" class="count-badge">0</span></button>
           <button class="tab" role="tab" aria-selected="false" data-tab="networking">Networking <span id="networkingCount" class="count-badge">0</span></button>
+          <button class="tab" role="tab" aria-selected="false" data-tab="companies">Companies <span id="companiesCount" class="count-badge">0</span></button>
           <button class="tab" role="tab" aria-selected="false" data-tab="history">History <span id="historyCount" class="count-badge">0</span></button>
           <button class="tab" role="tab" aria-selected="false" data-tab="discover">Discover <span id="discoverCount" class="count-badge">0</span></button>
         </div>
@@ -166,6 +211,16 @@
       </div>
       <button class="icon-btn" id="closeNotes" aria-label="Close notes">×</button>
     </div>
+    <section id="peopleSection" class="people-section hidden">
+      <div class="people-head"><h3>People</h3><span id="peopleCount" class="people-count"></span></div>
+      <div id="peopleList" class="people-list"></div>
+      <form id="personForm" class="person-form" novalidate autocomplete="off">
+        <input id="personName" type="text" maxlength="100" placeholder="Name" aria-label="Person name" />
+        <input id="personRole" type="text" maxlength="100" placeholder="Role (optional)" aria-label="Person role" />
+        <input id="personLink" type="text" inputmode="url" maxlength="500" placeholder="LinkedIn link (optional)" aria-label="Person link" />
+        <button class="btn secondary small" type="submit">Add person</button>
+      </form>
+    </section>
     <form id="noteForm" class="note-form" novalidate>
       <textarea id="noteInput" rows="3" maxlength="1000" placeholder="Add a note: who you reached out to, what they said, next step…" aria-label="New note"></textarea>
       <div class="note-form-foot">
@@ -174,6 +229,9 @@
       </div>
     </form>
     <div id="notesList" class="notes-list" aria-live="polite"></div>
+    <div id="companyFoot" class="drawer-foot hidden">
+      <button id="deleteCompany" type="button" class="btn ghost small danger">Remove company</button>
+    </div>
   </aside>
 
   <div id="toast" class="toast hidden" role="status">

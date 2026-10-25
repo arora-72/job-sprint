@@ -24,7 +24,12 @@ const state = {
   tab: 'open',          // 'open' | 'networking' | 'history' | 'discover'
   filter: null,         // null | 'today' | 'backlog' | 'applied-today'
   historyFilter: 'all', // 'all' | 'successful' | 'stale' | 'blocked'
-  notesJobId: null,     // job whose notes drawer is open
+  notesJobId: null,     // id of the job or company whose drawer is open
+  notesKind: 'job',     // 'job' | 'company'
+  companies: [],
+  companiesLoaded: false,
+  companiesLoading: false,
+  companyFilter: 'all', // 'all' | a stage key
   pendingBlockId: null,
   preview: null,        // { url, token }
   lastSync: null,
@@ -44,7 +49,10 @@ const els = {};
   'titleInput', 'companyInput', 'locationInput', 'cancelPreview', 'saveJob',
   'statOpenValue', 'statOpenSub', 'statAppliedValue', 'statAppliedSub', 'statTodayValue', 'statTodaySub',
   'statBacklog', 'statBacklogValue', 'statBacklogSub', 'statNetworking', 'statNetworkingValue', 'statNetworkingSub',
-  'openCount', 'networkingCount', 'discoverCount', 'historyCount',
+  'openCount', 'networkingCount', 'companiesCount', 'discoverCount', 'historyCount',
+  'companyModal', 'companyForm', 'companyName', 'companySource', 'companyChips', 'companyPeople', 'addPersonRow', 'companyRemark',
+  'companyErr', 'saveCompany', 'closeCompanyModal', 'cancelCompany',
+  'peopleSection', 'peopleList', 'peopleCount', 'personForm', 'personName', 'personRole', 'personLink', 'companyFoot', 'deleteCompany',
   'filterChip', 'filterChipText', 'syncText', 'refreshBtn', 'loadingState', 'emptyState', 'emptyIcon',
   'emptyTitle', 'emptyText', 'jobList', 'toast', 'toastText', 'toastUndo',
   'blockModal', 'blockJobName', 'blockReason', 'closeBlockModal', 'cancelBlock', 'confirmBlock', 'reasonChips',
@@ -168,6 +176,23 @@ async function loadJobs({ silent = false } = {}) {
   }
 }
 
+async function loadCompanies({ silent = false } = {}) {
+  if (state.companiesLoading || state.inflight.size) return false; // don't clobber optimistic changes mid-flight
+  state.companiesLoading = true;
+  try {
+    const data = await api('companies');
+    state.companies = data.companies || [];
+    return true;
+  } catch (err) {
+    if (!silent && state.tab === 'companies') showToast(err.message, { error: true });
+    return false;
+  } finally {
+    state.companiesLoading = false;
+    state.companiesLoaded = true;
+    render();
+  }
+}
+
 async function loadDiscover({ silent = false } = {}) {
   if (state.discoverLoading || state.discoverBusy.size) return false;
   state.discoverLoading = true;
@@ -197,7 +222,8 @@ async function refreshAll({ silent = false, afterAction = false } = {}) {
   els.refreshBtn.classList.add('spinning');
   els.refreshBtn.disabled = true;
   state.refreshPromise = (async () => {
-    const [jobsOk, discoverOk] = await Promise.all([loadJobs({ silent }), loadDiscover({ silent })]);
+    // Companies load alongside, but a companies failure never marks the whole refresh as failed.
+    const [jobsOk, discoverOk] = await Promise.all([loadJobs({ silent }), loadDiscover({ silent }), loadCompanies({ silent })]);
     state.refreshError = !(jobsOk && discoverOk);
     if (!state.refreshError) state.lastSync = new Date();
     return !state.refreshError;
@@ -303,7 +329,7 @@ function openRow(job) {
         ${ageBadge(job)}
         <div class="job-text">
           ${titleLink(job)}
-          <div class="job-sub">${subLine(job)}</div>
+          <div class="job-sub">${subLine(job)}${companyBadge(job)}</div>
           ${notePreview(job)}
         </div>
       </div>
@@ -346,7 +372,7 @@ function networkRow(job) {
         ${touchBadge(job)}
         <div class="job-text">
           ${titleLink(job)}
-          <div class="job-sub">${subLine(job)}</div>
+          <div class="job-sub">${subLine(job)}${companyBadge(job)}</div>
           ${notePreview(job)}
         </div>
       </div>
@@ -442,7 +468,7 @@ function group(title, hint, cls, rows) {
 const FILTER_LABELS = { today: 'Added today', backlog: 'Backlog only', 'applied-today': 'Applied today' };
 const HISTORY_FILTERS = [['all', 'All'], ['successful', 'Successful'], ['stale', 'Stale'], ['blocked', 'Blocked']];
 
-function plural(n, word) { return `${n} ${word}${n === 1 ? '' : 's'}`; }
+function plural(n, word, many) { return `${n} ${n === 1 ? word : (many || `${word}s`)}`; }
 
 function renderTiles(b) {
   els.statOpenValue.textContent = b.open.length;
@@ -521,6 +547,283 @@ function renderHistory(b) {
   return { empty: ['↗', 'No history yet', 'Blocked jobs and jobs you finish networking on land here.', false] };
 }
 
+/* ---------- Companies ---------- */
+const STAGE = {
+  watching: { label: 'Watching', hint: 'On your radar' },
+  reached_out: { label: 'Reached out', hint: 'Waiting on a reply' },
+  in_conversation: { label: 'In conversation', hint: 'Talking to someone' },
+  referral: { label: 'Referral secured', hint: 'Someone will refer you' },
+};
+const STAGE_ORDER = Object.keys(STAGE);
+const PERSON_STATUS = { not_contacted: 'Not contacted', messaged: 'Messaged', replied: 'Replied' };
+const CO_NUDGE_DAYS = 7;
+
+// "Ramp, Inc." and "ramp" match. Used to link jobs to tracked companies.
+const compKey = (s) => String(s || '').toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ')
+  .replace(/\b(inc|llc|corp|corporation|ltd|co|company)\b/g, ' ').replace(/\s+/g, ' ').trim();
+function companyFor(job) {
+  const key = compKey(job.company);
+  return key ? state.companies.find((c) => compKey(c.name) === key) || null : null;
+}
+function peopleOf(c) { return Array.isArray(c.people) ? c.people : []; }
+function stageOfCompany(c) { return STAGE[c.stage] ? c.stage : 'watching'; }
+function companyNudge(c) { return stageOfCompany(c) !== 'referral' && daysOld(c.updated_at) >= CO_NUDGE_DAYS; }
+
+function companyBadge(job) {
+  const c = companyFor(job);
+  if (!c) return '';
+  const n = peopleOf(c).length;
+  return `<button class="co-badge" data-action="company" data-company-id="${escapeHtml(c.id)}" title="Open ${escapeHtml(readableText(c.name))}">Tracked${n ? ` · ${plural(n, 'contact')}` : ''}</button>`;
+}
+
+function coTouchBadge(c) {
+  const age = Math.max(0, daysOld(c.updated_at));
+  const nudge = companyNudge(c);
+  const title = `Last activity ${age === 0 ? 'today' : `${age} day${age === 1 ? '' : 's'} ago`}${nudge ? '. Time for a nudge.' : ''}`;
+  return `<span class="age ${nudge ? '' : 'new'}" title="${escapeHtml(title)}">${age === 0 ? 'Today' : `${age}d`}</span>`;
+}
+
+function stageSelect(c) {
+  const current = stageOfCompany(c);
+  const options = STAGE_ORDER.map((key) => `<option value="${key}"${key === current ? ' selected' : ''}>${STAGE[key].label}</option>`).join('');
+  return `<label class="net-select-wrap co-stage s-${current}">
+    <span class="sr-only">Stage</span>
+    <select class="net-select" data-co-stage aria-label="Stage">${options}</select>
+  </label>`;
+}
+
+function peopleLine(c) {
+  const ppl = peopleOf(c);
+  if (!ppl.length) return '<button class="people-line empty" data-action="notes">+ Add people to reach out to</button>';
+  const chips = ppl.slice(0, 4).map((p) => `<span class="person-chip st-${escapeHtml(p.status || 'not_contacted')}" title="${escapeHtml(PERSON_STATUS[p.status] || PERSON_STATUS.not_contacted)}"><i></i>${displayHtml(p.name)}</span>`).join('');
+  return `<button class="people-line" data-action="notes" title="Open people and notes">${chips}${ppl.length > 4 ? `<span class="person-more">+${ppl.length - 4}</span>` : ''}</button>`;
+}
+
+function companyRow(c) {
+  const who = c.added_by || '?';
+  return `
+    <article class="job-row company" data-id="${escapeHtml(c.id)}">
+      <div class="job-main">
+        ${coTouchBadge(c)}
+        <div class="job-text">
+          <button class="job-title co-name" data-action="notes">${displayHtml(c.name)}</button>
+          <div class="job-sub">${[c.source ? displayHtml(c.source) : 'No source'].join('')}</div>
+          ${peopleLine(c)}
+          ${notePreview(c)}
+        </div>
+      </div>
+      <div class="job-meta stack">
+        ${stageSelect(c)}
+        <span class="meta-small"><span class="mini-avatar ${userClass(who)}">${escapeHtml(who[0])}</span>Added ${relDate(c.added_at)}</span>
+      </div>
+      <div class="actions">
+        <button class="btn secondary small" data-action="notes">People &amp; notes${notesOf(c).length ? ` <span class="btn-count">${notesOf(c).length}</span>` : ''}</button>
+      </div>
+    </article>`;
+}
+
+function renderCompanies() {
+  const f = state.companyFilter;
+  const all = state.companies;
+  const list = f === 'all' ? all : all.filter((c) => stageOfCompany(c) === f);
+  const filters = [['all', 'All'], ...STAGE_ORDER.map((k) => [k, STAGE[k].label])];
+  const bar = `<div class="subfilters co-bar" role="group" aria-label="Filter companies">
+    ${all.length ? filters.map(([key, label]) => {
+    const n = key === 'all' ? all.length : all.filter((c) => stageOfCompany(c) === key).length;
+    return `<button class="subfilter${key === f ? ' active' : ''}" data-cofilter="${key}" aria-pressed="${key === f}">${label} <span>${n}</span></button>`;
+  }).join('') : ''}
+    <button class="btn primary small co-new" data-co-new>+ Track company</button>
+  </div>`;
+  if (!all.length) return { html: bar, empty: ['◎', 'No companies tracked yet', 'Add a company you want to work at, with the people you plan to reach out to.', false] };
+  if (!list.length) return { html: bar, empty: ['–', `Nothing in ${STAGE[f].label}`, 'Try another filter.', false] };
+  const nudge = list.filter(companyNudge).sort((a, b) => new Date(a.updated_at) - new Date(b.updated_at));
+  const rest = list.filter((c) => !companyNudge(c)).sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+  let html = bar;
+  if (nudge.length) html += group(`Needs a nudge · ${nudge.length}`, `No activity for ${CO_NUDGE_DAYS}+ days`, 'backlog', nudge.map(companyRow).join(''));
+  if (rest.length) html += nudge.length ? group(`Active · ${rest.length}`, 'Most recent first', '', rest.map(companyRow).join('')) : rest.map(companyRow).join('');
+  return { html };
+}
+
+/* ----- Track-a-company popup ----- */
+function personRowHtml() {
+  return `<div class="person-row">
+    <input type="text" maxlength="100" placeholder="Name" aria-label="Person name" data-pr="name" />
+    <input type="text" maxlength="100" placeholder="Role" aria-label="Person role" data-pr="role" />
+    <input type="text" inputmode="url" maxlength="500" placeholder="LinkedIn link" aria-label="Person link" data-pr="link" />
+    <button type="button" class="icon-btn small" data-pr-remove aria-label="Remove person">×</button>
+  </div>`;
+}
+function openCompanyModal() {
+  if (!state.user) { chooseUser(); return; }
+  els.companyForm.reset();
+  els.companyPeople.innerHTML = personRowHtml();
+  els.companyErr.textContent = '';
+  els.saveCompany.disabled = false;
+  els.saveCompany.textContent = 'Track company';
+  syncSourceChips();
+  els.companyModal.classList.remove('hidden');
+  setTimeout(() => els.companyName.focus(), 30);
+}
+function closeCompanyModal() { els.companyModal.classList.add('hidden'); }
+function syncSourceChips() {
+  const v = els.companySource.value.trim().toLowerCase();
+  els.companyChips.querySelectorAll('.reason-chip').forEach((chip) => chip.classList.toggle('selected', chip.dataset.source.toLowerCase() === v));
+}
+els.companyChips.addEventListener('click', (e) => {
+  const chip = e.target.closest('[data-source]');
+  if (!chip) return;
+  els.companySource.value = els.companySource.value.trim() === chip.dataset.source ? '' : chip.dataset.source;
+  syncSourceChips();
+});
+els.companySource.addEventListener('input', syncSourceChips);
+els.addPersonRow.addEventListener('click', () => {
+  els.companyPeople.insertAdjacentHTML('beforeend', personRowHtml());
+  els.companyPeople.lastElementChild.querySelector('input').focus();
+});
+els.companyPeople.addEventListener('click', (e) => {
+  const rm = e.target.closest('[data-pr-remove]');
+  if (!rm) return;
+  const rows = els.companyPeople.querySelectorAll('.person-row');
+  if (rows.length === 1) rows[0].querySelectorAll('input').forEach((i) => { i.value = ''; });
+  else rm.closest('.person-row').remove();
+});
+els.closeCompanyModal.addEventListener('click', closeCompanyModal);
+els.cancelCompany.addEventListener('click', closeCompanyModal);
+els.companyModal.addEventListener('mousedown', (e) => { if (e.target === els.companyModal) closeCompanyModal(); });
+
+els.companyForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = els.companyName.value.trim();
+  if (!name) { els.companyErr.textContent = 'Company name is required.'; els.companyName.focus(); return; }
+  const people = [];
+  for (const row of els.companyPeople.querySelectorAll('.person-row')) {
+    const get = (k) => row.querySelector(`[data-pr="${k}"]`).value.trim();
+    const p = { name: get('name'), role: get('role'), link: get('link') };
+    if (!p.name && !p.role && !p.link) continue;
+    if (!p.name) { els.companyErr.textContent = 'Add a name for each person, or clear the row.'; row.querySelector('[data-pr="name"]').focus(); return; }
+    people.push(p);
+  }
+  const dup = state.companies.find((c) => compKey(c.name) === compKey(name));
+  if (dup) { els.companyErr.textContent = `${readableText(dup.name)} is already tracked.`; return; }
+  els.companyErr.textContent = '';
+  els.saveCompany.disabled = true;
+  els.saveCompany.textContent = 'Saving…';
+  try {
+    const res = await api('companies', {
+      method: 'POST',
+      body: JSON.stringify({ name, source: els.companySource.value.trim(), people, remark: els.companyRemark.value.trim(), added_by: state.user }),
+    });
+    state.companies.unshift(res.company);
+    closeCompanyModal();
+    state.companyFilter = 'all';
+    setView('companies');
+    showToast(`Tracking ${name}${people.length ? ` · ${plural(people.length, 'person', 'people')}` : ''}`);
+  } catch (err) {
+    els.companyErr.textContent = err.message;
+    els.saveCompany.disabled = false;
+    els.saveCompany.textContent = 'Track company';
+  }
+});
+
+/* ----- Company actions: stage, people, remove ----- */
+function setStage(id, stage) {
+  const now = new Date().toISOString();
+  return mutate(id, { stage, stage_updated_by: state.user, stage_updated_at: now, updated_at: now }, { action: 'stage', stage }, 'companies');
+}
+function addPerson(input) {
+  const id = state.notesJobId;
+  if (!id) return;
+  if (!state.user) { chooseUser(); return; }
+  const temp = { id: `pending-${Date.now()}`, name: input.name, role: input.role, link: input.link, status: 'not_contacted', by: state.user, at: new Date().toISOString(), pending: true };
+  mutate(id, (c) => ({ people: [...peopleOf(c), temp] }), { action: 'add-person', person: input }, 'companies');
+}
+function setPersonStatus(personId, status) {
+  const id = state.notesJobId;
+  if (!id) return;
+  if (!state.user) { chooseUser(); return; }
+  mutate(id, (c) => ({ people: peopleOf(c).map((p) => (p.id === personId ? { ...p, status } : p)), updated_at: new Date().toISOString() }),
+    { action: 'update-person', person_id: personId, changes: { status } }, 'companies');
+}
+function deletePerson(personId, button) {
+  if (!confirmTwice(button)) return;
+  if (!state.user) { chooseUser(); return; }
+  mutate(state.notesJobId, (c) => ({ people: peopleOf(c).filter((p) => p.id !== personId) }), { action: 'delete-person', person_id: personId }, 'companies');
+}
+async function removeCompany(button) {
+  const id = state.notesJobId;
+  const company = state.companies.find((c) => c.id === id);
+  if (!company || !confirmTwice(button, 'Really remove?')) return;
+  if (!state.user) { chooseUser(); return; }
+  state.companies = state.companies.filter((c) => c.id !== id);
+  closeNotes();
+  render();
+  try {
+    await api('companies', { method: 'PATCH', body: JSON.stringify({ id, actor: state.user, action: 'delete' }) });
+    showToast(`Removed ${readableText(company.name)}`);
+  } catch (err) {
+    state.companies.push(company);
+    render();
+    showToast(`Couldn't remove: ${err.message}`, { error: true });
+  }
+}
+// First click arms the button, a second click within 3 seconds confirms.
+function confirmTwice(button, armedText = 'Delete?') {
+  if (button.dataset.confirm === 'yes') return true;
+  const original = button.textContent;
+  button.dataset.confirm = 'yes';
+  button.textContent = armedText;
+  button.classList.add('confirming');
+  setTimeout(() => { if (button.isConnected) { button.dataset.confirm = ''; button.textContent = original; button.classList.remove('confirming'); } }, 3000);
+  return false;
+}
+
+function renderPeople(c) {
+  const ppl = peopleOf(c);
+  els.peopleCount.textContent = ppl.length ? plural(ppl.length, 'person', 'people') : '';
+  els.peopleList.innerHTML = ppl.length ? ppl.map((p) => {
+    const status = PERSON_STATUS[p.status] ? p.status : 'not_contacted';
+    const name = p.link ? `<a href="${escapeHtml(safeJobUrl(p.link))}" target="_blank" rel="noopener">${displayHtml(p.name)}</a>` : displayHtml(p.name);
+    const options = Object.entries(PERSON_STATUS).map(([k, v]) => `<option value="${k}"${k === status ? ' selected' : ''}>${v}</option>`).join('');
+    return `<div class="person${p.pending ? ' pending' : ''}" data-person-id="${escapeHtml(p.id)}">
+      <div class="person-info"><strong>${name}</strong>${p.role ? `<span class="person-role">${displayHtml(p.role)}</span>` : ''}</div>
+      ${p.pending ? '<span class="note-when">Saving…</span>' : `<label class="person-status st-${status}"><span class="sr-only">Outreach status</span><select data-person-status aria-label="Outreach status">${options}</select></label>
+      <button class="note-delete" data-person-delete>Delete</button>`}
+    </div>`;
+  }).join('') : '<div class="notes-empty">No one yet. Add the people you want to reach out to.</div>';
+}
+
+els.peopleList.addEventListener('change', (e) => {
+  const sel = e.target.closest('[data-person-status]');
+  if (sel) setPersonStatus(sel.closest('.person').dataset.personId, sel.value);
+});
+els.peopleList.addEventListener('click', (e) => {
+  const del = e.target.closest('[data-person-delete]');
+  if (del) deletePerson(del.closest('.person').dataset.personId, del);
+});
+els.personForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const name = els.personName.value.trim();
+  if (!name) { els.personName.focus(); return; }
+  addPerson({ name, role: els.personRole.value.trim(), link: els.personLink.value.trim() });
+  els.personForm.reset();
+  els.personName.focus();
+});
+els.deleteCompany.addEventListener('click', () => removeCompany(els.deleteCompany));
+
+// Company list: stage select, filters, the + button.
+els.jobList.addEventListener('change', (e) => {
+  const sel = e.target.closest('[data-co-stage]');
+  if (!sel) return;
+  const id = sel.closest('.job-row')?.dataset.id;
+  const c = state.companies.find((x) => x.id === id);
+  if (!c) return;
+  if (!state.user) { sel.value = stageOfCompany(c); chooseUser(); return; }
+  const prev = stageOfCompany(c);
+  if (sel.value === prev) return;
+  setStage(id, sel.value);
+  showToast(`${readableText(c.name)} · ${STAGE[sel.value].label}`, { undo: () => setStage(id, prev) });
+});
+
 function renderDiscover() {
   const html = state.discoverLoaded ? state.discover.map(discoverRow).join('') : '<div class="state-card">Loading matches…</div>';
   if (html) return { html };
@@ -543,6 +846,7 @@ function render() {
   // Tabs + filter chip
   els.openCount.textContent = b.open.length;
   els.networkingCount.textContent = b.networking.length;
+  els.companiesCount.textContent = state.companies.length;
   els.discoverCount.textContent = state.discover.length;
   els.historyCount.textContent = b.history.length;
   if (typeof syncTabFade === 'function') requestAnimationFrame(syncTabFade);
@@ -561,10 +865,10 @@ function render() {
   els.syncText.classList.toggle('sync-error', state.refreshError);
 
   // List
-  const renderers = { open: renderOpen, networking: renderNetworking, history: renderHistory, discover: renderDiscover };
+  const renderers = { open: renderOpen, networking: renderNetworking, companies: renderCompanies, history: renderHistory, discover: renderDiscover };
   const { html = '', empty = null } = renderers[state.tab](b);
   els.jobList.innerHTML = html;
-  const showEmpty = !!empty && (state.tab === 'discover' ? state.discoverLoaded : state.loadedOnce);
+  const showEmpty = !!empty && (state.tab === 'discover' ? state.discoverLoaded : state.tab === 'companies' ? state.companiesLoaded : state.loadedOnce);
   els.emptyState.classList.toggle('hidden', !showEmpty);
   if (empty) {
     els.emptyIcon.textContent = empty[0];
@@ -582,7 +886,7 @@ function setView(tab, filter = null) {
   render();
   if (changed) document.querySelector(`.tab[data-tab="${tab}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   syncTabFade();
-  if (tab === 'discover' && !state.discoverLoaded && !state.refreshPromise) refreshAll({ silent: true });
+  if ((tab === 'discover' && !state.discoverLoaded) || (tab === 'companies' && !state.companiesLoaded)) { if (!state.refreshPromise) refreshAll({ silent: true }); }
 }
 document.querySelectorAll('.stat').forEach((s) => s.addEventListener('click', () => {
   const v = s.dataset.view;
@@ -649,15 +953,15 @@ function localPatch(status, reason) {
 }
 
 // Apply a change locally right away, then save it. Saves for one job run in order; a failure rolls back.
-function mutate(id, local, body) {
-  const job = state.jobs.find((j) => j.id === id);
+function mutate(id, local, body, coll = 'jobs') {
+  const job = (coll === 'companies' ? state.companies : state.jobs).find((j) => j.id === id);
   if (!job) return Promise.resolve(null);
-  const before = { ...job, notes: [...notesOf(job)] };
+  const before = { ...job, notes: [...notesOf(job)], people: [...peopleOf(job)] };
   if (local) Object.assign(job, typeof local === 'function' ? local(job) : local);
   render();
 
   const prev = state.inflight.get(id) || Promise.resolve();
-  const next = prev.catch(() => {}).then(() => api('jobs', {
+  const next = prev.catch(() => {}).then(() => api(coll, {
     method: 'PATCH',
     body: JSON.stringify({ id, actor: state.user, ...body }),
   }));
@@ -746,8 +1050,13 @@ function jobLabel(job) { return `${readableText(job.title || 'Role')}${job.compa
 els.jobList.addEventListener('click', (e) => {
   const hf = e.target.closest('[data-hfilter]');
   if (hf) { state.historyFilter = hf.dataset.hfilter; render(); return; }
+  const cf = e.target.closest('[data-cofilter]');
+  if (cf) { state.companyFilter = cf.dataset.cofilter; render(); return; }
+  if (e.target.closest('[data-co-new]')) { openCompanyModal(); return; }
   const btn = e.target.closest('[data-action]');
   if (!btn) return;
+  if (btn.dataset.action === 'company') { openNotes(btn.dataset.companyId, 'company'); return; }
+  if (btn.closest('.job-row.company')) { openNotes(btn.closest('.job-row').dataset.id, 'company'); return; }
   const id = btn.closest('.job-row')?.dataset.id;
   const job = state.jobs.find((j) => j.id === id);
   if (!job) return;
@@ -809,11 +1118,22 @@ function linkify(raw) {
 }
 
 function renderNotes() {
-  const job = state.jobs.find((j) => j.id === state.notesJobId);
+  const company = state.notesKind === 'company';
+  const job = (company ? state.companies : state.jobs).find((j) => j.id === state.notesJobId);
   if (!job) { closeNotes(); return; }
-  els.notesTitle.textContent = readableText(job.title || 'Untitled role');
-  const stageLabel = { open: 'To apply', networking: `Networking · ${NETWORK[netStatus(job)].label}`, history: 'History' }[stageOf(job)];
-  els.notesSub.textContent = [readableText(job.company || ''), stageLabel].filter(Boolean).join(' · ');
+  els.peopleSection.classList.toggle('hidden', !company);
+  els.companyFoot.classList.toggle('hidden', !company);
+  els.notesDrawer.classList.toggle('is-company', company);
+  if (company) {
+    els.notesTitle.textContent = readableText(job.name);
+    els.notesSub.textContent = [readableText(job.source || ''), STAGE[stageOfCompany(job)].label].filter(Boolean).join(' · ');
+    renderPeople(job);
+  } else {
+    els.notesTitle.textContent = readableText(job.title || 'Untitled role');
+    const stageLabel = { open: 'To apply', networking: `Networking · ${NETWORK[netStatus(job)].label}`, history: 'History' }[stageOf(job)];
+    els.notesSub.textContent = [readableText(job.company || ''), stageLabel].filter(Boolean).join(' · ');
+  }
+  els.noteInput.placeholder = company ? 'Add a note: a post you saw, who to message first, what you sent…' : 'Add a note: who you reached out to, what they said, next step…';
   const notes = [...notesOf(job)].reverse();
   els.notesList.innerHTML = notes.length ? notes.map((n) => `
     <div class="note${n.pending ? ' pending' : ''}" data-note-id="${escapeHtml(n.id)}">
@@ -828,8 +1148,9 @@ function renderNotes() {
     : '<div class="notes-empty">No notes yet. Log who you contacted, what they said, and what comes next.</div>';
 }
 
-function openNotes(id) {
+function openNotes(id, kind = 'job') {
   state.notesJobId = id;
+  state.notesKind = kind;
   renderNotes();
   els.notesBackdrop.classList.remove('hidden');
   els.notesDrawer.classList.remove('hidden');
@@ -849,7 +1170,7 @@ function addNote() {
   if (text.length > 1000) { showToast('Notes can be up to 1,000 characters.', { error: true }); return; }
   const temp = { id: `pending-${Date.now()}`, text, by: state.user, at: new Date().toISOString(), pending: true };
   els.noteInput.value = '';
-  mutate(id, (job) => ({ notes: [...notesOf(job), temp] }), { action: 'add-note', text });
+  mutate(id, (job) => ({ notes: [...notesOf(job), temp] }), { action: 'add-note', text }, state.notesKind === 'company' ? 'companies' : 'jobs');
 }
 function deleteNote(noteId, button) {
   const id = state.notesJobId;
@@ -863,7 +1184,7 @@ function deleteNote(noteId, button) {
     return;
   }
   if (!state.user) { chooseUser(); return; }
-  mutate(id, (job) => ({ notes: notesOf(job).filter((n) => n.id !== noteId) }), { action: 'delete-note', note_id: noteId });
+  mutate(id, (job) => ({ notes: notesOf(job).filter((n) => n.id !== noteId) }), { action: 'delete-note', note_id: noteId }, state.notesKind === 'company' ? 'companies' : 'jobs');
 }
 
 els.closeNotes.addEventListener('click', closeNotes);
@@ -1032,7 +1353,7 @@ els.jobUrl.addEventListener('paste', (e) => {
 // Pasting a link anywhere on the page does the same.
 document.addEventListener('paste', (e) => {
   if (e.target.closest && e.target.closest('input, textarea, [contenteditable]')) return;
-  if (!els.userModal.classList.contains('hidden') || !els.blockModal.classList.contains('hidden') || state.notesJobId) return;
+  if (!els.userModal.classList.contains('hidden') || !els.blockModal.classList.contains('hidden') || !els.companyModal.classList.contains('hidden') || state.notesJobId) return;
   const text = (e.clipboardData && e.clipboardData.getData('text')) || '';
   if (isHttpUrl(text)) { e.preventDefault(); startAdd(text); }
 });
@@ -1040,11 +1361,12 @@ document.addEventListener('paste', (e) => {
 /* ---------- Keyboard ---------- */
 document.addEventListener('keydown', (e) => {
   const typing = e.target.closest && e.target.closest('input, textarea');
-  if (e.key === '/' && !typing && els.blockModal.classList.contains('hidden') && !state.notesJobId) {
+  if (e.key === '/' && !typing && els.blockModal.classList.contains('hidden') && els.companyModal.classList.contains('hidden') && !state.notesJobId) {
     e.preventDefault();
     els.jobUrl.focus();
   } else if (e.key === 'Escape') {
-    if (state.notesJobId) closeNotes();
+    if (!els.companyModal.classList.contains('hidden')) closeCompanyModal();
+    else if (state.notesJobId) closeNotes();
     else if (!els.blockModal.classList.contains('hidden')) closeBlockModal();
     else if (!els.userModal.classList.contains('hidden') && state.user) els.userModal.classList.add('hidden');
     else if (!els.addPanel.classList.contains('hidden')) closePanel();

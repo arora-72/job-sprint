@@ -4,6 +4,14 @@ Changes to Job Sprint are recorded here. The initial Git snapshot is `v1.0.0`. E
 
 ## Unreleased
 
+### Companies
+
+- New **Companies** tab for tracking companies you want to work at. The **+ Track company** popup takes the company (required), a source (LinkedIn, Referral, Event, Career page, or your own), the people to reach out to (name, role, link), and remarks.
+- Each company has a stage (Watching, Reached out, In conversation, Referral secured) and each person has an outreach status (Not contacted, Messaged, Replied). Companies with no activity for 7+ days rise to a "Needs a nudge" group.
+- A side panel holds the people list and a running notes log, same as job notes.
+- Jobs at a tracked company show a **Tracked · N contacts** badge. Matching ignores case, punctuation and suffixes like Inc.
+- Run `supabase/companies.sql` once before deploying. It adds one new table and leaves the jobs table alone.
+
 ### Celebration
 
 - Clicking **Applied** now fires a short confetti burst. The 1st, 3rd, 5th and 10th application of the day get a bigger burst and a cheer in the toast. Users with reduced-motion turned on see no animation.
