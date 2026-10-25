@@ -567,3 +567,26 @@ textarea { resize: vertical; }
 }
 
 .confetti { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 100; }
+
+/* ---------- LinkedIn quick copy ---------- */
+.li-wrap { position: relative; }
+.li-chip { display: flex; align-items: stretch; border: 1px solid var(--border); background: var(--surface); border-radius: 9px; height: 34px; overflow: hidden; }
+.li-copy, .li-edit { background: none; border: 0; color: var(--text-2); display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 500; transition: background .15s, color .15s; }
+.li-copy { padding: 0 10px 0 8px; }
+.li-edit { padding: 0 8px; border-left: 1px solid var(--border); }
+.li-copy:hover, .li-edit:hover { background: var(--surface-2); color: var(--text); }
+.li-edit svg { width: 14px; height: 14px; }
+.li-badge { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 4px; background: var(--accent); color: #fff; font-size: 11px; font-weight: 700; letter-spacing: -.02em; }
+.li-pop { position: absolute; right: 0; top: calc(100% + 8px); z-index: 60; width: min(340px, calc(100vw - 32px)); background: var(--surface); border: 1px solid var(--border-strong); border-radius: 12px; padding: 12px; box-shadow: 0 12px 32px rgba(0,0,0,.18); display: grid; gap: 8px; }
+.li-pop.hidden { display: none; }
+.li-pop label { font-size: 12px; font-weight: 600; color: var(--text-2); }
+.li-pop label span { font-weight: 400; color: var(--text-3, var(--text-2)); }
+.li-pop input { width: 100%; }
+.li-pop-foot { display: flex; align-items: center; gap: 8px; justify-content: flex-end; }
+.li-err { margin-right: auto; font-size: 12px; color: var(--danger, #b3261e); }
+@media (max-width: 720px) { .li-label { display: none; } .li-copy { padding: 0 8px; } }
+@media (max-width: 720px) {
+  .li-wrap { position: static; }
+  .li-pop { position: fixed; left: 16px; right: 16px; top: 64px; width: auto; }
+}
+@media (max-width: 480px) { .brand-name { display: none; } }

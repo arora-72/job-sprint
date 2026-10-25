@@ -4,6 +4,10 @@ Changes to Job Sprint are recorded here. The initial Git snapshot is `v1.0.0`. E
 
 ## Unreleased
 
+### LinkedIn quick copy
+
+- A **Copy LinkedIn** button sits in the top bar. One click copies your link. The first click asks you to save it, and the pencil edits it later. Each person's link is saved per name, in that browser.
+
 ### Celebration
 
 - Clicking **Applied** now fires a short confetti burst. The 1st, 3rd, 5th and 10th application of the day get a bigger burst and a cheer in the toast. Users with reduced-motion turned on see no animation.

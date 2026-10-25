@@ -39,6 +39,7 @@ let refreshTimer = null;
 
 const els = {};
 [
+  'linkedinCopy', 'linkedinLabel', 'linkedinEdit', 'linkedinForm', 'linkedinInput', 'linkedinWho', 'linkedinErr', 'linkedinCancel',
   'userModal', 'switchUser', 'activeUser', 'activeUserAvatar', 'themeToggle', 'addForm', 'jobUrl', 'parseBtn',
   'addPanel', 'addPanelUrl', 'parseConfidence', 'parseStatus', 'dupWarning', 'previewForm',
   'titleInput', 'companyInput', 'locationInput', 'cancelPreview', 'saveJob',
@@ -117,11 +118,75 @@ function setUser(name) {
   els.activeUserAvatar.textContent = name[0];
   els.activeUserAvatar.className = `avatar ${userClass(name)}`;
   els.userModal.classList.add('hidden');
+  renderLinkedin();
   if (!els.addPanel.classList.contains('hidden')) els.titleInput.focus();
 }
 function chooseUser() { els.userModal.classList.remove('hidden'); }
 document.querySelectorAll('.user-choice').forEach((btn) => btn.addEventListener('click', () => setUser(btn.dataset.user)));
 els.switchUser.addEventListener('click', chooseUser);
+
+/* ---------- LinkedIn quick copy (saved per person, in this browser) ---------- */
+const liKey = () => `jobSprintLinkedin:${state.user || 'guest'}`;
+const getLinkedin = () => store.get(liKey()) || '';
+function renderLinkedin() {
+  const url = getLinkedin();
+  els.linkedinLabel.textContent = url ? 'Copy LinkedIn' : 'Add LinkedIn';
+  els.linkedinCopy.title = url ? `Copy ${url}` : 'Save your LinkedIn link once, then copy it in one click';
+}
+function normalizeLinkedin(raw) {
+  let v = String(raw || '').trim();
+  if (!v) return '';
+  if (!/^https?:\/\//i.test(v)) v = `https://${v}`;
+  try {
+    const u = new URL(v);
+    if (!/(^|\.)linkedin\.com$/i.test(u.hostname)) return null;
+    return u.href;
+  } catch { return null; }
+}
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch { /* fall through */ }
+  const ta = document.createElement('textarea');
+  ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { ok = false; }
+  ta.remove();
+  return ok;
+}
+function openLinkedinForm() {
+  els.linkedinInput.value = getLinkedin();
+  els.linkedinErr.textContent = '';
+  els.linkedinWho.textContent = state.user ? `(${state.user})` : '';
+  els.linkedinForm.classList.remove('hidden');
+  els.linkedinInput.focus();
+}
+function closeLinkedinForm() { els.linkedinForm.classList.add('hidden'); }
+els.linkedinCopy.addEventListener('click', async () => {
+  const url = getLinkedin();
+  if (!url) { openLinkedinForm(); return; }
+  const ok = await copyText(url);
+  els.linkedinLabel.textContent = ok ? 'Copied ✓' : 'Copy failed';
+  setTimeout(renderLinkedin, 1400);
+  if (!ok) showToast('Couldn’t copy. Open the pencil and copy it from there.', { error: true });
+});
+els.linkedinEdit.addEventListener('click', () => (els.linkedinForm.classList.contains('hidden') ? openLinkedinForm() : closeLinkedinForm()));
+els.linkedinCancel.addEventListener('click', closeLinkedinForm);
+els.linkedinForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const raw = els.linkedinInput.value;
+  const url = normalizeLinkedin(raw);
+  if (url === null) { els.linkedinErr.textContent = 'Use a linkedin.com link.'; return; }
+  store.set(liKey(), url);
+  renderLinkedin();
+  closeLinkedinForm();
+  showToast(url ? 'LinkedIn link saved.' : 'LinkedIn link cleared.');
+});
+document.addEventListener('mousedown', (e) => {
+  if (!els.linkedinForm.classList.contains('hidden') && !e.target.closest('.li-wrap')) closeLinkedinForm();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !els.linkedinForm.classList.contains('hidden')) { closeLinkedinForm(); e.stopPropagation(); }
+}, true);
 
 /* ---------- Toast with optional Undo ---------- */
 function showToast(message, { error = false, undo = null } = {}) {
