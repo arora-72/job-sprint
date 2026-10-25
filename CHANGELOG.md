@@ -4,6 +4,11 @@ Changes to Job Sprint are recorded here. The initial Git snapshot is `v1.0.0`. E
 
 ## Unreleased
 
+### Notes in Discover
+
+- Every Discover role has a notes button and a latest-note preview, same as jobs. When you click **Add to Pipeline**, the notes move onto the new job.
+- Run `supabase/discover-notes.sql` once before deploying. It adds one column to `discover_jobs` and changes nothing else.
+
 ### Delete
 
 - Every job and company row has a **⋯** menu with **Delete**. On desktop, right-clicking a row opens the same menu. Right-clicking a link or field still shows the browser's own menu.

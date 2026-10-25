@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const { supabase } = require('./_supabase');
 const { normalizeJobUrl, sourceKey } = require('./_job-url');
 
@@ -13,6 +14,46 @@ const date = (value) => {
   const parsed = new Date(`${value}T12:00:00Z`);
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 };
+
+const NOTE_MAX_CHARS = 1000;
+const NOTE_MAX_COUNT = 200;
+const NOTE_RETRIES = 3;
+const roleById = (id) => `discover_jobs?id=eq.${encodeURIComponent(id)}`;
+
+// Notes are a JSON array on the role. Writes only succeed if the row has not changed since it
+// was read (so two people adding notes at once do not overwrite each other), and retry otherwise.
+async function updateNotes(id, change) {
+  for (let attempt = 0; attempt < NOTE_RETRIES; attempt += 1) {
+    const rows = await supabase(`${roleById(id)}&select=notes,updated_at`);
+    const current = rows?.[0];
+    if (!current) return json(404, { error: 'This role was not found.' });
+    const next = change(Array.isArray(current.notes) ? current.notes : []);
+    if (next.error) return json(400, { error: next.error });
+    const now = new Date().toISOString();
+    const updated = await supabase(`${roleById(id)}&updated_at=eq.${encodeURIComponent(current.updated_at)}`, {
+      method: 'PATCH', headers: { Prefer: 'return=representation' }, body: { notes: next.notes, updated_at: now },
+    });
+    if (updated?.[0]) return json(200, { role: updated[0], note: next.note });
+  }
+  return json(409, { error: 'Someone else just edited this role. Try again.' });
+}
+
+async function handleNoteAction(body) {
+  if (body.action === 'add-note') {
+    const text = typeof body.text === 'string' ? body.text.trim() : '';
+    if (!text) return json(400, { error: 'Write a note first.' });
+    if (text.length > NOTE_MAX_CHARS) return json(400, { error: `Notes can be up to ${NOTE_MAX_CHARS} characters.` });
+    const note = { id: crypto.randomUUID(), text, by: body.actor, at: new Date().toISOString() };
+    return updateNotes(body.id, (notes) => (notes.length >= NOTE_MAX_COUNT
+      ? { error: 'This role has too many notes.' }
+      : { notes: [...notes, note], note }));
+  }
+  if (body.action === 'delete-note') {
+    if (!body.note_id || typeof body.note_id !== 'string') return json(400, { error: 'Missing note.' });
+    return updateNotes(body.id, (notes) => ({ notes: notes.filter((n) => n && n.id !== body.note_id) }));
+  }
+  return json(400, { error: 'Unknown action.' });
+}
 
 async function getQueue() {
   const [discover, jobs] = await Promise.all([
@@ -43,7 +84,11 @@ async function addToPipeline(id, actor) {
   const created = await supabase('jobs', {
     method: 'POST',
     headers: { Prefer: 'return=representation' },
-    body: [{ company: role.company, title: role.title, location: role.location, url: role.url, added_by: actor, status: 'pipeline' }],
+    // Notes written in Discover carry over to the job.
+    body: [{
+      company: role.company, title: role.title, location: role.location, url: role.url, added_by: actor, status: 'pipeline',
+      notes: Array.isArray(role.notes) ? role.notes : [],
+    }],
   });
   const job = created[0];
   await supabase(`discover_jobs?id=eq.${encodeURIComponent(id)}`, {
@@ -105,9 +150,11 @@ exports.handler = async (event) => {
     if (event.httpMethod === 'GET') return json(200, { roles: await getQueue() });
     if (event.httpMethod === 'PUT') return await ingest(event);
     if (event.httpMethod === 'POST' || event.httpMethod === 'PATCH') {
-      const { id, actor } = JSON.parse(event.body || '{}');
+      const body = JSON.parse(event.body || '{}');
+      const { id, actor } = body;
       if (!validId(id) || !validActor(actor)) return json(400, { error: 'Invalid role or name.' });
       if (event.httpMethod === 'POST') return await addToPipeline(id, actor);
+      if (body.action && body.action !== 'dismiss') return await handleNoteAction(body);
       const updated = await supabase(`discover_jobs?id=eq.${encodeURIComponent(id)}&status=eq.new`, {
         method: 'PATCH', headers: { Prefer: 'return=representation' },
         body: { status: 'dismissed', acted_by: actor, acted_at: new Date().toISOString(), updated_at: new Date().toISOString() },

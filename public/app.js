@@ -259,7 +259,7 @@ async function loadCompanies({ silent = false } = {}) {
 }
 
 async function loadDiscover({ silent = false } = {}) {
-  if (state.discoverLoading || state.discoverBusy.size) return false;
+  if (state.discoverLoading || state.discoverBusy.size || state.inflight.size) return false;
   state.discoverLoading = true;
   try {
     const data = await api('discover');
@@ -508,6 +508,7 @@ function discoverRow(role) {
           <a class="job-title" href="${url}" target="_blank" rel="noopener">${displayHtml(role.title)}</a>
           <div class="job-sub">${sub}</div>
           ${role.why_fit ? `<p class="discover-why">${displayHtml(role.why_fit)}</p>` : ''}
+          ${notePreview(role)}
         </div>
         <div class="discover-rating" aria-label="Fit rating">
           <div class="score-gauge ${scoreTone}" style="--score: ${score}" role="img" aria-label="Fit score ${hasScore ? `${score} out of 100` : 'not available'}">
@@ -521,6 +522,7 @@ function discoverRow(role) {
       <div class="discover-foot">
         <span class="discover-found">Found ${found}</span>
         <div class="actions">
+          ${notesButton(role)}
           <a class="btn ghost small" href="${url}" target="_blank" rel="noopener">View job ↗</a>
           <button class="btn secondary small" data-discover-action="dismiss"${busy}>Dismiss</button>
           <button class="btn primary small" data-discover-action="add"${busy}>Add to Pipeline</button>
@@ -993,11 +995,13 @@ els.jobList.addEventListener('click', async (event) => {
       const result = await api('discover', { method: 'POST', body: JSON.stringify({ id, actor: state.user }) });
       if (result.job) state.jobs.unshift(result.job);
       state.discover = state.discover.filter((item) => item.id !== id);
+      if (state.notesKind === 'discover' && state.notesJobId === id) closeNotes();
       setView('open');
       showToast(`Added: ${jobLabel(result.job)}`);
     } else {
       await api('discover', { method: 'PATCH', body: JSON.stringify({ id, actor: state.user }) });
       state.discover = state.discover.filter((item) => item.id !== id);
+      if (state.notesKind === 'discover' && state.notesJobId === id) closeNotes();
       showToast(`Dismissed: ${jobLabel(role)}`);
     }
     saved = true;
@@ -1021,9 +1025,12 @@ function localPatch(status, reason) {
   return { status, applied_by: null, applied_at: null, blocked_by: null, blocked_at: null, blocked_reason: '', ...CLEARED_NETWORK, updated_at: now };
 }
 
+function listFor(coll) { return coll === 'companies' ? state.companies : coll === 'discover' ? state.discover : state.jobs; }
+const collOf = (kind) => (kind === 'company' ? 'companies' : kind === 'discover' ? 'discover' : 'jobs');
+
 // Apply a change locally right away, then save it. Saves for one job run in order; a failure rolls back.
 function mutate(id, local, body, coll = 'jobs') {
-  const job = (coll === 'companies' ? state.companies : state.jobs).find((j) => j.id === id);
+  const job = listFor(coll).find((j) => j.id === id);
   if (!job) return Promise.resolve(null);
   const before = { ...job, notes: [...notesOf(job)], people: [...peopleOf(job)] };
   if (local) Object.assign(job, typeof local === 'function' ? local(job) : local);
@@ -1038,7 +1045,8 @@ function mutate(id, local, body, coll = 'jobs') {
   let saved = false;
   next.then((res) => {
     saved = true;
-    if (state.inflight.get(id) === next && res && res.job) Object.assign(job, res.job);
+    const savedRow = res && (res.job || res.company || res.role);
+    if (state.inflight.get(id) === next && savedRow) Object.assign(job, savedRow);
   })
     .catch((err) => {
       if (state.inflight.get(id) === next) {
@@ -1124,6 +1132,8 @@ els.jobList.addEventListener('click', (e) => {
   if (e.target.closest('[data-co-new]')) { openCompanyModal(); return; }
   const btn = e.target.closest('[data-action]');
   if (!btn) return;
+  const discoverRowEl = btn.closest('.discover-row');
+  if (discoverRowEl && btn.dataset.action === 'notes') { openNotes(discoverRowEl.dataset.id, 'discover'); return; }
   if (btn.dataset.action === 'menu') {
     const row = btn.closest('.job-row');
     const kind = row.classList.contains('company') ? 'company' : 'job';
@@ -1195,7 +1205,8 @@ function linkify(raw) {
 
 function renderNotes() {
   const company = state.notesKind === 'company';
-  const job = (company ? state.companies : state.jobs).find((j) => j.id === state.notesJobId);
+  const discover = state.notesKind === 'discover';
+  const job = listFor(collOf(state.notesKind)).find((j) => j.id === state.notesJobId);
   if (!job) { closeNotes(); return; }
   els.peopleSection.classList.toggle('hidden', !company);
   els.companyFoot.classList.toggle('hidden', !company);
@@ -1204,12 +1215,17 @@ function renderNotes() {
     els.notesTitle.textContent = readableText(job.name);
     els.notesSub.textContent = [readableText(job.source || ''), STAGE[stageOfCompany(job)].label].filter(Boolean).join(' · ');
     renderPeople(job);
+  } else if (discover) {
+    els.notesTitle.textContent = readableText(job.title || 'Untitled role');
+    els.notesSub.textContent = [readableText(job.company || ''), 'Discover'].filter(Boolean).join(' · ');
   } else {
     els.notesTitle.textContent = readableText(job.title || 'Untitled role');
     const stageLabel = { open: 'To apply', networking: `Networking · ${NETWORK[netStatus(job)].label}`, history: 'History' }[stageOf(job)];
     els.notesSub.textContent = [readableText(job.company || ''), stageLabel].filter(Boolean).join(' · ');
   }
-  els.noteInput.placeholder = company ? 'Add a note: a post you saw, who to message first, what you sent…' : 'Add a note: who you reached out to, what they said, next step…';
+  els.noteInput.placeholder = company ? 'Add a note: a post you saw, who to message first, what you sent…'
+    : discover ? 'Add a note: why this one stands out, who could refer you… (it moves with the job)'
+      : 'Add a note: who you reached out to, what they said, next step…';
   const notes = [...notesOf(job)].reverse();
   els.notesList.innerHTML = notes.length ? notes.map((n) => `
     <div class="note${n.pending ? ' pending' : ''}" data-note-id="${escapeHtml(n.id)}">
@@ -1246,7 +1262,7 @@ function addNote() {
   if (text.length > 1000) { showToast('Notes can be up to 1,000 characters.', { error: true }); return; }
   const temp = { id: `pending-${Date.now()}`, text, by: state.user, at: new Date().toISOString(), pending: true };
   els.noteInput.value = '';
-  mutate(id, (job) => ({ notes: [...notesOf(job), temp] }), { action: 'add-note', text }, state.notesKind === 'company' ? 'companies' : 'jobs');
+  mutate(id, (job) => ({ notes: [...notesOf(job), temp] }), { action: 'add-note', text }, collOf(state.notesKind));
 }
 function deleteNote(noteId, button) {
   const id = state.notesJobId;
@@ -1260,7 +1276,7 @@ function deleteNote(noteId, button) {
     return;
   }
   if (!state.user) { chooseUser(); return; }
-  mutate(id, (job) => ({ notes: notesOf(job).filter((n) => n.id !== noteId) }), { action: 'delete-note', note_id: noteId }, state.notesKind === 'company' ? 'companies' : 'jobs');
+  mutate(id, (job) => ({ notes: notesOf(job).filter((n) => n.id !== noteId) }), { action: 'delete-note', note_id: noteId }, collOf(state.notesKind));
 }
 
 els.closeNotes.addEventListener('click', closeNotes);
