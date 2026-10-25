@@ -6,7 +6,7 @@ Changes to Job Sprint are recorded here. The initial Git snapshot is `v1.0.0`. E
 
 ### Owners
 
-- Every job and company has an **owner**: Garima, Indresh, or Unassigned. A small pill under the title shows it, and clicking the pill opens a menu to reassign with a six-second Undo.
+- Every job and company has an **owner**: Garima, Indresh, or Unassigned. A big profile circle at the left of each row shows it (G, I, or a dashed + when unassigned). Clicking the circle opens a menu to reassign, with a six-second Undo.
 - A new job belongs to whoever adds it, including jobs added from Discover. New companies start Unassigned unless you pick an owner in the popup.
 - An **Owner** filter bar (Everyone, Garima, Indresh, Unassigned) narrows the list, the tab counts and the dashboard tiles together. It remembers your choice in that browser.
 - Owner is separate from "applied by". The owner is who is responsible, and applied-by is who clicked Applied.

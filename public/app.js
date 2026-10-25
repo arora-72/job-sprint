@@ -347,10 +347,11 @@ const ownerMatch = (item) => state.ownerFilter === 'all' || (state.ownerFilter =
 const OWNER_FILTERS = [['all', 'Everyone'], ['Garima', 'Garima'], ['Indresh', 'Indresh'], ['none', 'Unassigned']];
 const ownerLabel = (key) => (OWNER_FILTERS.find(([k]) => k === key) || [, 'Everyone'])[1];
 
-function ownerPill(item) {
+// A big profile circle at the left of every row: G, I, or a dashed + when unassigned. Click to change.
+function ownerCircle(item) {
   const who = item.assigned_to;
   const title = who ? `Assigned to ${who}. Click to change.` : 'Unassigned. Click to assign.';
-  return `<button class="owner-pill${who ? '' : ' none'}" data-action="owner" title="${title}" aria-label="${title}"><span class="mini-avatar ${userClass(who)}">${who ? who[0] : '+'}</span>${who || 'Unassigned'}</button>`;
+  return `<button class="own ${who ? userClass(who) : 'none'}" data-action="owner" title="${title}" aria-label="${title}">${who ? who[0] : '+'}</button>`;
 }
 
 function buckets() {
@@ -404,10 +405,11 @@ function openRow(job) {
   return `
     <article class="job-row" data-id="${escapeHtml(job.id)}">
       <div class="job-main">
+        ${ownerCircle(job)}
         ${ageBadge(job)}
         <div class="job-text">
           ${titleLink(job)}
-          <div class="job-sub">${subLine(job)}${ownerPill(job)}${companyBadge(job)}</div>
+          <div class="job-sub">${subLine(job)}${companyBadge(job)}</div>
           ${notePreview(job)}
         </div>
       </div>
@@ -448,10 +450,11 @@ function networkRow(job) {
   return `
     <article class="job-row networking${ready ? ' is-ready' : ''}" data-id="${escapeHtml(job.id)}">
       <div class="job-main">
+        ${ownerCircle(job)}
         ${touchBadge(job)}
         <div class="job-text">
           ${titleLink(job)}
-          <div class="job-sub">${subLine(job)}${ownerPill(job)}${companyBadge(job)}</div>
+          <div class="job-sub">${subLine(job)}${companyBadge(job)}</div>
           ${notePreview(job)}
         </div>
       </div>
@@ -481,9 +484,10 @@ function historyRow(job) {
   return `
     <article class="job-row history" data-id="${escapeHtml(job.id)}">
       <div class="job-main">
+        ${ownerCircle(job)}
         <div class="job-text">
           ${titleLink(job)}
-          <div class="job-sub">${subLine(job)}${ownerPill(job)}</div>
+          <div class="job-sub">${subLine(job)}</div>
           ${notePreview(job)}
         </div>
       </div>
@@ -687,10 +691,11 @@ function companyRow(c) {
   return `
     <article class="job-row company" data-id="${escapeHtml(c.id)}">
       <div class="job-main">
+        ${ownerCircle(c)}
         ${coTouchBadge(c)}
         <div class="job-text">
           <button class="job-title co-name" data-action="notes">${displayHtml(c.name)}</button>
-          <div class="job-sub">${c.source ? displayHtml(c.source) : 'No source'}${ownerPill(c)}</div>
+          <div class="job-sub">${c.source ? displayHtml(c.source) : 'No source'}</div>
           ${peopleLine(c)}
           ${notePreview(c)}
         </div>
@@ -1406,7 +1411,7 @@ els.rowMenu.addEventListener('keydown', (e) => {
   items[(i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length].focus();
 });
 document.addEventListener('mousedown', (e) => {
-  if (!els.rowMenu.classList.contains('hidden') && !e.target.closest('#rowMenu, .menu-btn, .owner-pill')) closeRowMenu();
+  if (!els.rowMenu.classList.contains('hidden') && !e.target.closest('#rowMenu, .menu-btn, .own')) closeRowMenu();
 });
 window.addEventListener('resize', closeRowMenu);
 window.addEventListener('scroll', closeRowMenu, true);
