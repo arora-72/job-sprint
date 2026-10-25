@@ -30,6 +30,7 @@ const state = {
   companiesLoaded: false,
   companiesLoading: false,
   companyFilter: 'all', // 'all' | a stage key
+  ownerFilter: ['all', 'Garima', 'Indresh', 'none'].includes(store.get('jobSprintOwnerFilter')) ? store.get('jobSprintOwnerFilter') : 'all',
   pendingBlockId: null,
   preview: null,        // { url, token }
   lastSync: null,
@@ -51,7 +52,7 @@ const els = {};
   'statOpenValue', 'statOpenSub', 'statAppliedValue', 'statAppliedSub', 'statTodayValue', 'statTodaySub',
   'statBacklog', 'statBacklogValue', 'statBacklogSub', 'statNetworking', 'statNetworkingValue', 'statNetworkingSub',
   'openCount', 'networkingCount', 'companiesCount', 'discoverCount', 'historyCount',
-  'rowMenu', 'companyModal', 'companyForm', 'companyName', 'companySource', 'companyChips', 'companyPeople', 'addPersonRow', 'companyRemark',
+  'ownerBar', 'companyOwner', 'rowMenu', 'companyModal', 'companyForm', 'companyName', 'companySource', 'companyChips', 'companyPeople', 'addPersonRow', 'companyRemark',
   'companyErr', 'saveCompany', 'closeCompanyModal', 'cancelCompany',
   'peopleSection', 'peopleList', 'peopleCount', 'personForm', 'personName', 'personRole', 'personLink', 'companyFoot', 'deleteCompany',
   'filterChip', 'filterChipText', 'syncText', 'refreshBtn', 'loadingState', 'emptyState', 'emptyIcon',
@@ -341,18 +342,30 @@ function closedAt(job) { return job.network_closed_at || job.blocked_at || job.a
 function outcomeOf(job) { return job.status === 'blocked' ? 'blocked' : netStatus(job); }
 function notesOf(job) { return Array.isArray(job.notes) ? job.notes : []; }
 
+// Owner: who is responsible for a job or company. The filter bar narrows every list and tile.
+const ownerMatch = (item) => state.ownerFilter === 'all' || (state.ownerFilter === 'none' ? !item.assigned_to : item.assigned_to === state.ownerFilter);
+const OWNER_FILTERS = [['all', 'Everyone'], ['Garima', 'Garima'], ['Indresh', 'Indresh'], ['none', 'Unassigned']];
+const ownerLabel = (key) => (OWNER_FILTERS.find(([k]) => k === key) || [, 'Everyone'])[1];
+
+function ownerPill(item) {
+  const who = item.assigned_to;
+  const title = who ? `Assigned to ${who}. Click to change.` : 'Unassigned. Click to assign.';
+  return `<button class="owner-pill${who ? '' : ' none'}" data-action="owner" title="${title}" aria-label="${title}"><span class="mini-avatar ${userClass(who)}">${who ? who[0] : '+'}</span>${who || 'Unassigned'}</button>`;
+}
+
 function buckets() {
   const t0 = startOfToday();
   const byStage = { open: [], networking: [], history: [] };
-  state.jobs.forEach((j) => byStage[stageOf(j)].push(j));
+  const jobs = state.jobs.filter(ownerMatch);
+  jobs.forEach((j) => byStage[stageOf(j)].push(j));
   const open = byStage.open;
   const backlog = open.filter((j) => new Date(j.added_at) < t0).sort((a, b) => new Date(a.added_at) - new Date(b.added_at));
   const today = open.filter((j) => new Date(j.added_at) >= t0).sort((a, b) => new Date(b.added_at) - new Date(a.added_at));
   // Least recently touched first, so neglected jobs rise to the top.
   const networking = byStage.networking.sort((a, b) => new Date(lastTouch(a)) - new Date(lastTouch(b)));
   const history = byStage.history.sort((a, b) => new Date(closedAt(b)) - new Date(closedAt(a)));
-  const appliedToday = state.jobs.filter((j) => j.status === 'applied' && new Date(j.applied_at) >= t0);
-  const addedToday = state.jobs.filter((j) => new Date(j.added_at) >= t0);
+  const appliedToday = jobs.filter((j) => j.status === 'applied' && new Date(j.applied_at) >= t0);
+  const addedToday = jobs.filter((j) => new Date(j.added_at) >= t0);
   return { open, backlog, today, networking, history, appliedToday, addedToday };
 }
 
@@ -394,7 +407,7 @@ function openRow(job) {
         ${ageBadge(job)}
         <div class="job-text">
           ${titleLink(job)}
-          <div class="job-sub">${subLine(job)}${companyBadge(job)}</div>
+          <div class="job-sub">${subLine(job)}${ownerPill(job)}${companyBadge(job)}</div>
           ${notePreview(job)}
         </div>
       </div>
@@ -438,7 +451,7 @@ function networkRow(job) {
         ${touchBadge(job)}
         <div class="job-text">
           ${titleLink(job)}
-          <div class="job-sub">${subLine(job)}${companyBadge(job)}</div>
+          <div class="job-sub">${subLine(job)}${ownerPill(job)}${companyBadge(job)}</div>
           ${notePreview(job)}
         </div>
       </div>
@@ -470,7 +483,7 @@ function historyRow(job) {
       <div class="job-main">
         <div class="job-text">
           ${titleLink(job)}
-          <div class="job-sub">${subLine(job)}</div>
+          <div class="job-sub">${subLine(job)}${ownerPill(job)}</div>
           ${notePreview(job)}
         </div>
       </div>
@@ -677,7 +690,7 @@ function companyRow(c) {
         ${coTouchBadge(c)}
         <div class="job-text">
           <button class="job-title co-name" data-action="notes">${displayHtml(c.name)}</button>
-          <div class="job-sub">${[c.source ? displayHtml(c.source) : 'No source'].join('')}</div>
+          <div class="job-sub">${c.source ? displayHtml(c.source) : 'No source'}${ownerPill(c)}</div>
           ${peopleLine(c)}
           ${notePreview(c)}
         </div>
@@ -695,7 +708,7 @@ function companyRow(c) {
 
 function renderCompanies() {
   const f = state.companyFilter;
-  const all = state.companies;
+  const all = state.companies.filter(ownerMatch);
   const list = f === 'all' ? all : all.filter((c) => stageOfCompany(c) === f);
   const filters = [['all', 'All'], ...STAGE_ORDER.map((k) => [k, STAGE[k].label])];
   const bar = `<div class="subfilters co-bar" role="group" aria-label="Filter companies">
@@ -782,7 +795,7 @@ els.companyForm.addEventListener('submit', async (e) => {
   try {
     const res = await api('companies', {
       method: 'POST',
-      body: JSON.stringify({ name, source: els.companySource.value.trim(), people, remark: els.companyRemark.value.trim(), added_by: state.user }),
+      body: JSON.stringify({ name, source: els.companySource.value.trim(), assigned_to: els.companyOwner.value || null, people, remark: els.companyRemark.value.trim(), added_by: state.user }),
     });
     state.companies.unshift(res.company);
     closeCompanyModal();
@@ -905,6 +918,29 @@ function renderDiscover() {
   };
 }
 
+// Everything on the current tab before the owner filter, so the filter bar can show honest counts.
+function tabBase() {
+  if (state.tab === 'discover') return null;
+  if (state.tab === 'companies') return state.companies;
+  return state.jobs.filter((j) => stageOf(j) === state.tab);
+}
+function renderOwnerBar() {
+  const base = tabBase();
+  els.ownerBar.classList.toggle('hidden', !base);
+  if (!base) return;
+  els.ownerBar.innerHTML = `<span class="owner-label">Owner</span>${OWNER_FILTERS.map(([key, label]) => {
+    const n = key === 'all' ? base.length : key === 'none' ? base.filter((x) => !x.assigned_to).length : base.filter((x) => x.assigned_to === key).length;
+    return `<button class="subfilter${key === state.ownerFilter ? ' active' : ''}" data-owner-filter="${key}" aria-pressed="${key === state.ownerFilter}">${label} <span>${n}</span></button>`;
+  }).join('')}`;
+}
+els.ownerBar.addEventListener('click', (e) => {
+  const chip = e.target.closest('[data-owner-filter]');
+  if (!chip) return;
+  state.ownerFilter = chip.dataset.ownerFilter;
+  store.set('jobSprintOwnerFilter', state.ownerFilter);
+  render();
+});
+
 function render() {
   const b = buckets();
   renderTiles(b);
@@ -917,7 +953,7 @@ function render() {
   // Tabs + filter chip
   els.openCount.textContent = b.open.length;
   els.networkingCount.textContent = b.networking.length;
-  els.companiesCount.textContent = state.companies.length;
+  els.companiesCount.textContent = state.companies.filter(ownerMatch).length;
   els.discoverCount.textContent = state.discover.length;
   els.historyCount.textContent = b.history.length;
   if (typeof syncTabFade === 'function') requestAnimationFrame(syncTabFade);
@@ -937,7 +973,11 @@ function render() {
 
   // List
   const renderers = { open: renderOpen, networking: renderNetworking, companies: renderCompanies, history: renderHistory, discover: renderDiscover };
-  const { html = '', empty = null } = renderers[state.tab](b);
+  renderOwnerBar();
+  let { html = '', empty = null } = renderers[state.tab](b);
+  if (empty && state.ownerFilter !== 'all' && tabBase()?.length) {
+    empty = ['–', state.ownerFilter === 'none' ? 'Nothing unassigned here' : `Nothing for ${state.ownerFilter} here`, 'Switch to Everyone to see the rest.', false];
+  }
   els.jobList.innerHTML = html;
   const showEmpty = !!empty && (state.tab === 'discover' ? state.discoverLoaded : state.tab === 'companies' ? state.companiesLoaded : state.loadedOnce);
   els.emptyState.classList.toggle('hidden', !showEmpty);
@@ -1134,6 +1174,13 @@ els.jobList.addEventListener('click', (e) => {
   if (!btn) return;
   const discoverRowEl = btn.closest('.discover-row');
   if (discoverRowEl && btn.dataset.action === 'notes') { openNotes(discoverRowEl.dataset.id, 'discover'); return; }
+  if (btn.dataset.action === 'owner') {
+    const row = btn.closest('.job-row');
+    const kind = row.classList.contains('company') ? 'company' : 'job';
+    if (els.rowMenu.dataset.id === row.dataset.id && !els.rowMenu.classList.contains('hidden')) closeRowMenu();
+    else openOwnerMenu(row.dataset.id, kind, btn);
+    return;
+  }
   if (btn.dataset.action === 'menu') {
     const row = btn.closest('.job-row');
     const kind = row.classList.contains('company') ? 'company' : 'job';
@@ -1304,14 +1351,24 @@ function openRowMenu(id, kind, anchor, point) {
   const items = kind === 'company'
     ? '<button role="menuitem" class="menu-item" data-menu="open">Open people &amp; notes</button>'
     : '<button role="menuitem" class="menu-item" data-menu="copy">Copy job link</button>';
-  els.rowMenu.innerHTML = `${items}<button role="menuitem" class="menu-item danger" data-menu="delete">Delete…</button>`;
+  showRowMenu(id, kind, `${items}<button role="menuitem" class="menu-item danger" data-menu="delete">Delete…</button>`, anchor, point);
+}
+function openOwnerMenu(id, kind, anchor) {
+  const entry = entryOf(id, kind);
+  if (!entry) return;
+  const current = entry.assigned_to || '';
+  const options = [['Garima', 'Garima'], ['Indresh', 'Indresh'], ['', 'Unassigned']];
+  showRowMenu(id, kind, `<div class="menu-title">Assign to</div>${options.map(([value, label]) => `<button role="menuitem" class="menu-item${value === current ? ' current' : ''}" data-menu="assign" data-owner="${value}">${label}${value === current ? '<span class="menu-check" aria-hidden="true">✓</span>' : ''}</button>`).join('')}`, anchor, null, 'left');
+}
+function showRowMenu(id, kind, itemsHtml, anchor, point, align = 'right') {
+  els.rowMenu.innerHTML = itemsHtml;
   els.rowMenu.dataset.id = id;
   els.rowMenu.dataset.kind = kind;
   els.rowMenu.classList.remove('hidden');
   const w = els.rowMenu.offsetWidth;
   const h = els.rowMenu.offsetHeight;
   let x; let y;
-  if (anchor) { const r = anchor.getBoundingClientRect(); x = r.right - w; y = r.bottom + 6; } else { x = point.x; y = point.y; }
+  if (anchor) { const r = anchor.getBoundingClientRect(); x = align === 'left' ? r.left : r.right - w; y = r.bottom + 6; } else { x = point.x; y = point.y; }
   x = Math.max(8, Math.min(x, innerWidth - w - 8));
   if (y + h > innerHeight - 8) y = Math.max(8, (anchor ? anchor.getBoundingClientRect().top - h - 6 : y - h));
   els.rowMenu.style.left = `${x}px`;
@@ -1328,6 +1385,7 @@ els.rowMenu.addEventListener('click', async (e) => {
   const { id, kind } = els.rowMenu.dataset;
   const entry = entryOf(id, kind);
   if (!entry) { closeRowMenu(); return; }
+  if (item.dataset.menu === 'assign') { closeRowMenu(); assignOwner(id, kind, item.dataset.owner || null); return; }
   if (item.dataset.menu === 'open') { closeRowMenu(); openNotes(id, 'company'); return; }
   if (item.dataset.menu === 'copy') {
     closeRowMenu();
@@ -1348,7 +1406,7 @@ els.rowMenu.addEventListener('keydown', (e) => {
   items[(i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length].focus();
 });
 document.addEventListener('mousedown', (e) => {
-  if (!els.rowMenu.classList.contains('hidden') && !e.target.closest('#rowMenu, .menu-btn')) closeRowMenu();
+  if (!els.rowMenu.classList.contains('hidden') && !e.target.closest('#rowMenu, .menu-btn, .owner-pill')) closeRowMenu();
 });
 window.addEventListener('resize', closeRowMenu);
 window.addEventListener('scroll', closeRowMenu, true);
@@ -1361,6 +1419,16 @@ els.jobList.addEventListener('contextmenu', (e) => {
   e.preventDefault();
   openRowMenu(row.dataset.id, kind, null, { x: e.clientX, y: e.clientY });
 });
+
+function assignOwner(id, kind, who) {
+  if (!state.user) { chooseUser(); return; }
+  const entry = entryOf(id, kind);
+  if (!entry) return;
+  const prev = entry.assigned_to || null;
+  if (prev === who) return;
+  mutate(id, { assigned_to: who, updated_at: new Date().toISOString() }, { action: 'assign', assigned_to: who }, collOf(kind));
+  showToast(who ? `Assigned to ${who}` : 'Now unassigned', { undo: () => assignOwner(id, kind, prev) });
+}
 
 // Delete removes the row at once and offers a six-second Undo that puts it back exactly as it was.
 async function deleteEntry(id, kind) {

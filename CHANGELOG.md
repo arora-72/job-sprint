@@ -4,6 +4,14 @@ Changes to Job Sprint are recorded here. The initial Git snapshot is `v1.0.0`. E
 
 ## Unreleased
 
+### Owners
+
+- Every job and company has an **owner**: Garima, Indresh, or Unassigned. A small pill under the title shows it, and clicking the pill opens a menu to reassign with a six-second Undo.
+- A new job belongs to whoever adds it, including jobs added from Discover. New companies start Unassigned unless you pick an owner in the popup.
+- An **Owner** filter bar (Everyone, Garima, Indresh, Unassigned) narrows the list, the tab counts and the dashboard tiles together. It remembers your choice in that browser.
+- Owner is separate from "applied by". The owner is who is responsible, and applied-by is who clicked Applied.
+- Run `supabase/assign.sql` once before deploying. It saves a backup of the jobs table, adds an owner column to jobs and companies, and sets existing jobs to whoever added them.
+
 ### Notes in Discover
 
 - Every Discover role has a notes button and a latest-note preview, same as jobs. When you click **Add to Pipeline**, the notes move onto the new job.

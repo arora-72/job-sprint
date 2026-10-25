@@ -43,7 +43,7 @@ can view and change the shared jobs.
 ### 1. Create a free Supabase project
 
 Open Supabase, create a project, then open **SQL Editor** and run the contents of `supabase/schema.sql`.
-For Discover, also run `supabase/discover.sql` in the same project. For the Networking stage and notes, run `supabase/networking.sql`. For tracked companies, run `supabase/companies.sql`. For notes on Discover roles, run `supabase/discover-notes.sql`. All five are safe to re-run.
+For Discover, also run `supabase/discover.sql` in the same project. For the Networking stage and notes, run `supabase/networking.sql`. For tracked companies, run `supabase/companies.sql`. For notes on Discover roles, run `supabase/discover-notes.sql`. For owners, run `supabase/assign.sql`. All six are safe to re-run.
 
 From **Project Settings → API**, copy:
 - Project URL → `SUPABASE_URL`

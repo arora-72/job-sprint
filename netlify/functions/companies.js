@@ -27,7 +27,7 @@ const isIso = (v) => typeof v === 'string' && !Number.isNaN(Date.parse(v));
 function cleanRestoredCompany(row) {
   if (!row || typeof row !== 'object') return { error: 'Nothing to restore.' };
   const out = {};
-  for (const key of ['id', 'name', 'source', 'stage', 'stage_updated_by', 'stage_updated_at', 'people', 'notes', 'added_by', 'added_at', 'updated_at']) {
+  for (const key of ['id', 'name', 'source', 'assigned_to', 'stage', 'stage_updated_by', 'stage_updated_at', 'people', 'notes', 'added_by', 'added_at', 'updated_at']) {
     if (row[key] !== undefined) out[key] = row[key];
   }
   if (!UUID.test(out.id || '')) return { error: 'Invalid company id.' };
@@ -35,6 +35,7 @@ function cleanRestoredCompany(row) {
   if (out.source !== undefined && (typeof out.source !== 'string' || out.source.length > SOURCE_MAX)) return { error: 'Invalid source.' };
   if (!STAGES.includes(out.stage)) return { error: 'Invalid stage.' };
   if (!USERS.includes(out.added_by)) return { error: 'Invalid owner.' };
+  if (out.assigned_to != null && !USERS.includes(out.assigned_to)) return { error: 'Invalid assignee.' };
   if (out.stage_updated_by != null && !USERS.includes(out.stage_updated_by)) return { error: 'Invalid person.' };
   if (!['stage_updated_at', 'added_at', 'updated_at'].every((k) => out[k] == null || isIso(out[k]))) return { error: 'Invalid date.' };
   if (out.people !== undefined && (!Array.isArray(out.people) || out.people.length > PEOPLE_MAX)) return { error: 'Invalid people.' };
@@ -96,6 +97,15 @@ async function handlePatch(body) {
     const updated = await supabase(byId(id), {
       method: 'PATCH', headers: { Prefer: 'return=representation' },
       body: { stage: body.stage, stage_updated_by: actor, stage_updated_at: now, updated_at: now },
+    });
+    return updated?.[0] ? json(200, { company: updated[0] }) : json(404, { error: 'Company not found.' });
+  }
+
+  if (action === 'assign') {
+    const owner = body.assigned_to;
+    if (owner !== null && !USERS.includes(owner)) return bad('Choose Garima, Indresh, or Unassigned.');
+    const updated = await supabase(byId(id), {
+      method: 'PATCH', headers: { Prefer: 'return=representation' }, body: { assigned_to: owner, updated_at: now },
     });
     return updated?.[0] ? json(200, { company: updated[0] }) : json(404, { error: 'Company not found.' });
   }
@@ -218,6 +228,10 @@ exports.handler = async (event) => {
         people.push(built.person);
       }
 
+      // New companies start Unassigned unless an owner is chosen in the popup.
+      if (body.assigned_to != null && !USERS.includes(body.assigned_to)) return bad('Choose Garima, Indresh, or Unassigned.');
+      const owner = body.assigned_to || null;
+
       const remark = text(body.remark, NOTE_MAX_CHARS + 1);
       if (remark.length > NOTE_MAX_CHARS) return bad(`Remarks can be up to ${NOTE_MAX_CHARS} characters.`);
       const notes = remark ? [{ id: crypto.randomUUID(), text: remark, by: body.added_by, at: now }] : [];
@@ -225,7 +239,7 @@ exports.handler = async (event) => {
       try {
         const created = await supabase('companies', {
           method: 'POST', headers: { Prefer: 'return=representation' },
-          body: [{ name, source: text(body.source, SOURCE_MAX), people, notes, added_by: body.added_by }],
+          body: [{ name, source: text(body.source, SOURCE_MAX), people, notes, added_by: body.added_by, assigned_to: owner }],
         });
         return json(201, { company: created?.[0] });
       } catch (err) {

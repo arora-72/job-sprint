@@ -86,7 +86,7 @@ async function addToPipeline(id, actor) {
     headers: { Prefer: 'return=representation' },
     // Notes written in Discover carry over to the job.
     body: [{
-      company: role.company, title: role.title, location: role.location, url: role.url, added_by: actor, status: 'pipeline',
+      company: role.company, title: role.title, location: role.location, url: role.url, added_by: actor, assigned_to: actor, status: 'pipeline',
       notes: Array.isArray(role.notes) ? role.notes : [],
     }],
   });

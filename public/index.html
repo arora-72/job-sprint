@@ -80,6 +80,14 @@
         <input id="companySource" type="text" maxlength="60" placeholder="Or type your own source" aria-label="Source" />
       </div>
 
+      <label class="field"><span class="field-label">Owner <span class="opt">optional</span></span>
+        <select id="companyOwner" aria-label="Owner">
+          <option value="">Unassigned</option>
+          <option value="Garima">Garima</option>
+          <option value="Indresh">Indresh</option>
+        </select>
+      </label>
+
       <div class="field">
         <span class="field-label">People to reach out to <span class="opt">optional</span></span>
         <div id="companyPeople" class="person-rows"></div>
@@ -192,6 +200,8 @@
         <span class="stat-sub" id="statNetworkingSub">Applied, still networking</span>
       </button>
     </section>
+
+    <div id="ownerBar" class="owner-bar" role="group" aria-label="Filter by owner"></div>
 
     <section class="workspace">
       <div class="workspace-head">

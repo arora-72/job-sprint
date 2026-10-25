@@ -18,7 +18,7 @@ const CLEARED_NETWORK = {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const JOB_COLUMNS = ['id', 'company', 'title', 'location', 'url', 'status', 'added_by', 'added_at', 'applied_by', 'applied_at',
-  'blocked_by', 'blocked_at', 'blocked_reason', 'network_status', 'network_updated_by', 'network_updated_at',
+  'blocked_by', 'blocked_at', 'blocked_reason', 'assigned_to', 'network_status', 'network_updated_by', 'network_updated_at',
   'network_closed_by', 'network_closed_at', 'notes', 'updated_at'];
 
 // Undo for Delete: the browser sends the deleted row back. Only known columns, each checked.
@@ -34,7 +34,7 @@ function cleanRestoredJob(row) {
   try { if (!['http:', 'https:'].includes(new URL(out.url).protocol)) throw new Error('x'); } catch { return { error: 'Invalid job link.' }; }
   if (!['pipeline', 'applied', 'blocked'].includes(out.status)) return { error: 'Invalid job status.' };
   if (!USERS.includes(out.added_by)) return { error: 'Invalid job owner.' };
-  if (!['applied_by', 'blocked_by', 'network_updated_by', 'network_closed_by'].every((k) => who(out[k]))) return { error: 'Invalid person.' };
+  if (!['assigned_to', 'applied_by', 'blocked_by', 'network_updated_by', 'network_closed_by'].every((k) => who(out[k]))) return { error: 'Invalid person.' };
   if (!['added_at', 'applied_at', 'blocked_at', 'network_updated_at', 'network_closed_at', 'updated_at'].every((k) => when(out[k]))) return { error: 'Invalid date.' };
   if (out.network_status != null && !NETWORK_STATUSES.includes(out.network_status)) return { error: 'Invalid networking status.' };
   if (out.location !== undefined && !str(out.location, 300)) return { error: 'Invalid location.' };
@@ -134,6 +134,13 @@ async function handlePatch(body) {
     return job ? json(200, { job }) : json(409, { error: 'Only applied jobs can go back to Networking.' });
   }
 
+  if (action === 'assign') {
+    const owner = body.assigned_to;
+    if (owner !== null && !USERS.includes(owner)) return bad('Choose Garima, Indresh, or Unassigned.');
+    const job = await patchJob(byId(id), { assigned_to: owner, updated_at: now });
+    return job ? json(200, { job }) : json(404, { error: 'Job not found.' });
+  }
+
   if (action === 'delete') {
     await supabase(byId(id), { method: 'DELETE' });
     return json(200, { ok: true });
@@ -190,7 +197,7 @@ exports.handler = async (event) => {
       const created = await supabase('jobs', {
         method: 'POST',
         headers: { Prefer: 'return=representation' },
-        body: [{ company, title, location, url, added_by, status: 'pipeline' }],
+        body: [{ company, title, location, url, added_by, assigned_to: added_by, status: 'pipeline' }],
       });
       return json(201, { job: created?.[0] });
     }
