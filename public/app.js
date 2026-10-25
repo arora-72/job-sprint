@@ -51,7 +51,7 @@ const els = {};
   'statOpenValue', 'statOpenSub', 'statAppliedValue', 'statAppliedSub', 'statTodayValue', 'statTodaySub',
   'statBacklog', 'statBacklogValue', 'statBacklogSub', 'statNetworking', 'statNetworkingValue', 'statNetworkingSub',
   'openCount', 'networkingCount', 'companiesCount', 'discoverCount', 'historyCount',
-  'companyModal', 'companyForm', 'companyName', 'companySource', 'companyChips', 'companyPeople', 'addPersonRow', 'companyRemark',
+  'rowMenu', 'companyModal', 'companyForm', 'companyName', 'companySource', 'companyChips', 'companyPeople', 'addPersonRow', 'companyRemark',
   'companyErr', 'saveCompany', 'closeCompanyModal', 'cancelCompany',
   'peopleSection', 'peopleList', 'peopleCount', 'personForm', 'personName', 'personRole', 'personLink', 'companyFoot', 'deleteCompany',
   'filterChip', 'filterChipText', 'syncText', 'refreshBtn', 'loadingState', 'emptyState', 'emptyIcon',
@@ -407,6 +407,7 @@ function openRow(job) {
         ${openLink(job)}
         <button class="btn secondary small" data-action="block">Block</button>
         <button class="btn primary small" data-action="apply">Applied ✓</button>
+        ${menuButton()}
       </div>
     </article>`;
 }
@@ -449,6 +450,7 @@ function networkRow(job) {
         ${notesButton(job)}
         ${openLink(job)}
         <button class="btn ${ready ? 'primary' : 'secondary'} small" data-action="done" title="Move to History">Done → History</button>
+        ${menuButton()}
       </div>
     </article>`;
 }
@@ -484,6 +486,7 @@ function historyRow(job) {
         ${notesButton(job)}
         ${openLink(job)}
         <button class="btn secondary small" data-action="restore" title="${blocked ? 'Back to To apply' : 'Back to Networking'}">Move back</button>
+        ${menuButton()}
       </div>
     </article>`;
 }
@@ -683,6 +686,7 @@ function companyRow(c) {
       </div>
       <div class="actions">
         <button class="btn secondary small" data-action="notes">People &amp; notes${notesOf(c).length ? ` <span class="btn-count">${notesOf(c).length}</span>` : ''}</button>
+        ${menuButton()}
       </div>
     </article>`;
 }
@@ -1120,6 +1124,13 @@ els.jobList.addEventListener('click', (e) => {
   if (e.target.closest('[data-co-new]')) { openCompanyModal(); return; }
   const btn = e.target.closest('[data-action]');
   if (!btn) return;
+  if (btn.dataset.action === 'menu') {
+    const row = btn.closest('.job-row');
+    const kind = row.classList.contains('company') ? 'company' : 'job';
+    if (els.rowMenu.dataset.id === row.dataset.id && !els.rowMenu.classList.contains('hidden')) closeRowMenu();
+    else openRowMenu(row.dataset.id, kind, btn);
+    return;
+  }
   if (btn.dataset.action === 'company') { openNotes(btn.dataset.companyId, 'company'); return; }
   if (btn.closest('.job-row.company')) { openNotes(btn.closest('.job-row').dataset.id, 'company'); return; }
   const id = btn.closest('.job-row')?.dataset.id;
@@ -1262,6 +1273,126 @@ els.notesList.addEventListener('click', (e) => {
   const del = e.target.closest('[data-note-delete]');
   if (del) deleteNote(del.closest('.note').dataset.noteId, del);
 });
+
+/* ---------- Row menu (⋯ button or right-click) and Delete ---------- */
+const MENU_ICON = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>';
+function menuButton() {
+  return `<button class="btn ghost small menu-btn" data-action="menu" aria-label="More actions" aria-haspopup="menu" title="More actions">${MENU_ICON}</button>`;
+}
+function entryOf(id, kind) { return (kind === 'company' ? state.companies : state.jobs).find((x) => x.id === id); }
+
+// Opens next to a button, or at the pointer for a right-click.
+function openRowMenu(id, kind, anchor, point) {
+  const entry = entryOf(id, kind);
+  if (!entry) return;
+  const items = kind === 'company'
+    ? '<button role="menuitem" class="menu-item" data-menu="open">Open people &amp; notes</button>'
+    : '<button role="menuitem" class="menu-item" data-menu="copy">Copy job link</button>';
+  els.rowMenu.innerHTML = `${items}<button role="menuitem" class="menu-item danger" data-menu="delete">Delete…</button>`;
+  els.rowMenu.dataset.id = id;
+  els.rowMenu.dataset.kind = kind;
+  els.rowMenu.classList.remove('hidden');
+  const w = els.rowMenu.offsetWidth;
+  const h = els.rowMenu.offsetHeight;
+  let x; let y;
+  if (anchor) { const r = anchor.getBoundingClientRect(); x = r.right - w; y = r.bottom + 6; } else { x = point.x; y = point.y; }
+  x = Math.max(8, Math.min(x, innerWidth - w - 8));
+  if (y + h > innerHeight - 8) y = Math.max(8, (anchor ? anchor.getBoundingClientRect().top - h - 6 : y - h));
+  els.rowMenu.style.left = `${x}px`;
+  els.rowMenu.style.top = `${y}px`;
+  els.rowMenu.querySelector('.menu-item').focus({ preventScroll: true });
+}
+function closeRowMenu() {
+  els.rowMenu.classList.add('hidden');
+  els.rowMenu.dataset.id = '';
+}
+els.rowMenu.addEventListener('click', async (e) => {
+  const item = e.target.closest('[data-menu]');
+  if (!item) return;
+  const { id, kind } = els.rowMenu.dataset;
+  const entry = entryOf(id, kind);
+  if (!entry) { closeRowMenu(); return; }
+  if (item.dataset.menu === 'open') { closeRowMenu(); openNotes(id, 'company'); return; }
+  if (item.dataset.menu === 'copy') {
+    closeRowMenu();
+    showToast(await copyText(entry.url) ? 'Job link copied' : 'Couldn’t copy the link', { error: false });
+    return;
+  }
+  if (item.dataset.menu === 'delete') {
+    if (!confirmTwice(item, 'Click again to delete')) return;
+    closeRowMenu();
+    deleteEntry(id, kind);
+  }
+});
+els.rowMenu.addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+  e.preventDefault();
+  const items = [...els.rowMenu.querySelectorAll('.menu-item')];
+  const i = items.indexOf(document.activeElement);
+  items[(i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length].focus();
+});
+document.addEventListener('mousedown', (e) => {
+  if (!els.rowMenu.classList.contains('hidden') && !e.target.closest('#rowMenu, .menu-btn')) closeRowMenu();
+});
+window.addEventListener('resize', closeRowMenu);
+window.addEventListener('scroll', closeRowMenu, true);
+els.jobList.addEventListener('contextmenu', (e) => {
+  if (e.target.closest('a, input, select, textarea')) return; // keep the browser menu for links and fields
+  const row = e.target.closest('.job-row[data-id]');
+  if (!row) return;
+  const kind = row.classList.contains('company') ? 'company' : 'job';
+  if (!entryOf(row.dataset.id, kind)) return; // Discover rows have their own Dismiss
+  e.preventDefault();
+  openRowMenu(row.dataset.id, kind, null, { x: e.clientX, y: e.clientY });
+});
+
+// Delete removes the row at once and offers a six-second Undo that puts it back exactly as it was.
+async function deleteEntry(id, kind) {
+  if (!state.user) { chooseUser(); return; }
+  const coll = kind === 'company' ? 'companies' : 'jobs';
+  const row = entryOf(id, kind);
+  if (!row) return;
+  const label = kind === 'company' ? readableText(row.name) : jobLabel(row);
+  const snapshot = JSON.parse(JSON.stringify(row));
+  snapshot.notes = notesOf(snapshot).filter((n) => !n.pending);
+  if (kind === 'company') snapshot.people = peopleOf(snapshot).filter((p) => !p.pending);
+  if (state.notesJobId === id) closeNotes();
+  const drop = (list) => list.filter((x) => x.id !== id);
+  const removeLocal = () => { if (kind === 'company') state.companies = drop(state.companies); else state.jobs = drop(state.jobs); render(); };
+  const putBack = (entry) => {
+    const list = kind === 'company' ? state.companies : state.jobs;
+    if (!list.some((x) => x.id === entry.id)) list.push(entry);
+    render();
+  };
+
+  const run = (state.inflight.get(id) || Promise.resolve()).catch(() => {}).then(() => {
+    removeLocal();
+    return api(coll, { method: 'PATCH', body: JSON.stringify({ id, actor: state.user, action: 'delete' }) });
+  });
+  state.inflight.set(id, run);
+  try {
+    await run;
+  } catch (err) {
+    putBack(snapshot);
+    showToast(`Couldn't delete: ${err.message}`, { error: true });
+    return;
+  } finally {
+    if (state.inflight.get(id) === run) state.inflight.delete(id);
+  }
+  showToast(`Deleted ${label}`, {
+    undo: async () => {
+      try {
+        const res = await api(coll, { method: 'POST', body: JSON.stringify({ actor: state.user, restore: snapshot }) });
+        putBack(res.job || res.company || snapshot);
+        showToast(`Restored ${label}`);
+        refreshAll({ silent: true, afterAction: true });
+      } catch (err) {
+        showToast(`Couldn't restore: ${err.message}`, { error: true });
+      }
+    },
+  });
+  refreshAll({ silent: true, afterAction: true });
+}
 
 /* ---------- Block dialog ---------- */
 function openBlockModal(job) {
@@ -1430,7 +1561,8 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     els.jobUrl.focus();
   } else if (e.key === 'Escape') {
-    if (!els.companyModal.classList.contains('hidden')) closeCompanyModal();
+    if (!els.rowMenu.classList.contains('hidden')) closeRowMenu();
+    else if (!els.companyModal.classList.contains('hidden')) closeCompanyModal();
     else if (state.notesJobId) closeNotes();
     else if (!els.blockModal.classList.contains('hidden')) closeBlockModal();
     else if (!els.userModal.classList.contains('hidden') && state.user) els.userModal.classList.add('hidden');

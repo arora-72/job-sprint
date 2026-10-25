@@ -4,6 +4,12 @@ Changes to Job Sprint are recorded here. The initial Git snapshot is `v1.0.0`. E
 
 ## Unreleased
 
+### Delete
+
+- Every job and company row has a **⋯** menu with **Delete**. On desktop, right-clicking a row opens the same menu. Right-clicking a link or field still shows the browser's own menu.
+- Delete needs two clicks, removes the entry for both of you, then shows a six-second **Undo** that puts it back exactly as it was, including notes, people and networking status.
+- No database change.
+
 ### LinkedIn quick copy
 
 - A **Copy LinkedIn** button sits in the top bar. One click copies your link. The first click asks you to save it, and the pencil edits it later. Each person's link is saved per name, in that browser.

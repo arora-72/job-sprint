@@ -16,6 +16,33 @@ const CLEARED_NETWORK = {
   network_closed_by: null, network_closed_at: null,
 };
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const JOB_COLUMNS = ['id', 'company', 'title', 'location', 'url', 'status', 'added_by', 'added_at', 'applied_by', 'applied_at',
+  'blocked_by', 'blocked_at', 'blocked_reason', 'network_status', 'network_updated_by', 'network_updated_at',
+  'network_closed_by', 'network_closed_at', 'notes', 'updated_at'];
+
+// Undo for Delete: the browser sends the deleted row back. Only known columns, each checked.
+function cleanRestoredJob(row) {
+  if (!row || typeof row !== 'object') return { error: 'Nothing to restore.' };
+  const out = {};
+  for (const key of JOB_COLUMNS) if (row[key] !== undefined) out[key] = row[key];
+  const str = (v, max) => typeof v === 'string' && v.length <= max;
+  const who = (v) => v === null || v === undefined || USERS.includes(v);
+  const when = (v) => v === null || v === undefined || isIsoDate(v);
+  if (!UUID.test(out.id || '')) return { error: 'Invalid job id.' };
+  if (!str(out.company, 300) || !out.company.trim() || !str(out.title, 500) || !out.title.trim()) return { error: 'Invalid job details.' };
+  try { if (!['http:', 'https:'].includes(new URL(out.url).protocol)) throw new Error('x'); } catch { return { error: 'Invalid job link.' }; }
+  if (!['pipeline', 'applied', 'blocked'].includes(out.status)) return { error: 'Invalid job status.' };
+  if (!USERS.includes(out.added_by)) return { error: 'Invalid job owner.' };
+  if (!['applied_by', 'blocked_by', 'network_updated_by', 'network_closed_by'].every((k) => who(out[k]))) return { error: 'Invalid person.' };
+  if (!['added_at', 'applied_at', 'blocked_at', 'network_updated_at', 'network_closed_at', 'updated_at'].every((k) => when(out[k]))) return { error: 'Invalid date.' };
+  if (out.network_status != null && !NETWORK_STATUSES.includes(out.network_status)) return { error: 'Invalid networking status.' };
+  if (out.location !== undefined && !str(out.location, 300)) return { error: 'Invalid location.' };
+  if (out.blocked_reason !== undefined && !str(out.blocked_reason, 500)) return { error: 'Invalid reason.' };
+  if (out.notes !== undefined && (!Array.isArray(out.notes) || out.notes.length > NOTE_MAX_COUNT)) return { error: 'Invalid notes.' };
+  return { row: out };
+}
+
 function isIsoDate(value) {
   return typeof value === 'string' && !Number.isNaN(Date.parse(value));
 }
@@ -107,6 +134,11 @@ async function handlePatch(body) {
     return job ? json(200, { job }) : json(409, { error: 'Only applied jobs can go back to Networking.' });
   }
 
+  if (action === 'delete') {
+    await supabase(byId(id), { method: 'DELETE' });
+    return json(200, { ok: true });
+  }
+
   if (action === 'add-note') {
     const text = typeof body.text === 'string' ? body.text.trim() : '';
     if (!text) return bad('Write a note first.');
@@ -135,7 +167,20 @@ exports.handler = async (event) => {
     }
 
     if (event.httpMethod === 'POST') {
-      const { company, title, location = '', url, added_by } = JSON.parse(event.body || '{}');
+      const input = JSON.parse(event.body || '{}');
+      if (input.restore) {
+        if (!USERS.includes(input.actor)) return bad('Choose Garima or Indresh first.');
+        const cleaned = cleanRestoredJob(input.restore);
+        if (cleaned.error) return bad(cleaned.error);
+        try {
+          const restored = await supabase('jobs', { method: 'POST', headers: { Prefer: 'return=representation' }, body: [cleaned.row] });
+          return json(201, { job: restored?.[0] });
+        } catch (err) {
+          if (/duplicate key|unique constraint/i.test(err.message)) return json(409, { error: 'That job is already back.' });
+          throw err;
+        }
+      }
+      const { company, title, location = '', url, added_by } = input;
       if (!company || !title || !url || !USERS.includes(added_by)) return bad('Missing required job details.');
       try {
         if (!['http:', 'https:'].includes(new URL(url).protocol)) throw new Error('Unsupported link');

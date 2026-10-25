@@ -660,3 +660,16 @@ textarea { resize: vertical; }
   .co-new { margin-left: 0; }
   .job-row.company .job-meta { padding-left: 64px; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 }
+
+/* ---------- Row menu ---------- */
+.menu-btn { flex: none; padding: 0 8px; min-width: 32px; }
+.menu-btn svg { width: 16px; height: 16px; }
+.row-menu { position: fixed; z-index: 130; min-width: 190px; padding: 5px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: var(--shadow-lg); display: grid; animation: rise2 .12s ease-out; }
+.row-menu.hidden { display: none; }
+@keyframes rise2 { from { opacity: 0; transform: translateY(-4px); } }
+.menu-item { text-align: left; border: 0; background: none; padding: 8px 12px; border-radius: 8px; font-size: 13.5px; font-weight: 500; color: var(--text); }
+.menu-item:hover, .menu-item:focus-visible { background: var(--surface-2); outline: none; }
+.menu-item.danger { color: var(--danger); }
+.menu-item.danger:hover, .menu-item.danger:focus-visible { background: var(--danger-bg); }
+.menu-item.confirming { background: var(--danger); color: #fff; }
+@media (max-width: 720px) { .actions .menu-btn { flex: none; padding: 9px 12px; } }

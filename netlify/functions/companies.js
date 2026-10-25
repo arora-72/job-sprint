@@ -20,6 +20,28 @@ const byId = (id) => `companies?id=eq.${encodeURIComponent(id)}`;
 const text = (value, max) => (typeof value === 'string' ? value.trim().slice(0, max) : '');
 const isDuplicate = (err) => /duplicate key|unique constraint/i.test(err?.message || '');
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const isIso = (v) => typeof v === 'string' && !Number.isNaN(Date.parse(v));
+
+// Undo for Delete: the browser sends the deleted row back. Only known columns, each checked.
+function cleanRestoredCompany(row) {
+  if (!row || typeof row !== 'object') return { error: 'Nothing to restore.' };
+  const out = {};
+  for (const key of ['id', 'name', 'source', 'stage', 'stage_updated_by', 'stage_updated_at', 'people', 'notes', 'added_by', 'added_at', 'updated_at']) {
+    if (row[key] !== undefined) out[key] = row[key];
+  }
+  if (!UUID.test(out.id || '')) return { error: 'Invalid company id.' };
+  if (typeof out.name !== 'string' || !out.name.trim() || out.name.length > NAME_MAX) return { error: 'Invalid company name.' };
+  if (out.source !== undefined && (typeof out.source !== 'string' || out.source.length > SOURCE_MAX)) return { error: 'Invalid source.' };
+  if (!STAGES.includes(out.stage)) return { error: 'Invalid stage.' };
+  if (!USERS.includes(out.added_by)) return { error: 'Invalid owner.' };
+  if (out.stage_updated_by != null && !USERS.includes(out.stage_updated_by)) return { error: 'Invalid person.' };
+  if (!['stage_updated_at', 'added_at', 'updated_at'].every((k) => out[k] == null || isIso(out[k]))) return { error: 'Invalid date.' };
+  if (out.people !== undefined && (!Array.isArray(out.people) || out.people.length > PEOPLE_MAX)) return { error: 'Invalid people.' };
+  if (out.notes !== undefined && (!Array.isArray(out.notes) || out.notes.length > NOTE_MAX_COUNT)) return { error: 'Invalid notes.' };
+  return { row: out };
+}
+
 // Accepts "linkedin.com/in/x" or a full link. Returns '' when empty, null when invalid.
 function normalizeLink(raw) {
   const value = typeof raw === 'string' ? raw.trim() : '';
@@ -170,6 +192,18 @@ exports.handler = async (event) => {
     if (event.httpMethod === 'POST') {
       let body;
       try { body = JSON.parse(event.body || '{}'); } catch { return bad('Invalid request.'); }
+      if (body.restore) {
+        if (!USERS.includes(body.actor)) return bad('Choose Garima or Indresh first.');
+        const cleaned = cleanRestoredCompany(body.restore);
+        if (cleaned.error) return bad(cleaned.error);
+        try {
+          const restored = await supabase('companies', { method: 'POST', headers: { Prefer: 'return=representation' }, body: [cleaned.row] });
+          return json(201, { company: restored?.[0] });
+        } catch (err) {
+          if (isDuplicate(err)) return json(409, { error: 'That company is already back.' });
+          throw err;
+        }
+      }
       if (!USERS.includes(body.added_by)) return bad('Choose Garima or Indresh first.');
       const name = text(body.name, NAME_MAX);
       if (!name) return bad('Company name is required.');
