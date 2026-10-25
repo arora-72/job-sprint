@@ -565,3 +565,5 @@ textarea { resize: vertical; }
   .tab { margin-right: 12px; font-size: 14px; }
   .tab .count-badge { min-width: 18px; padding: 0 5px; margin-left: 2px; }
 }
+
+.confetti { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 100; }

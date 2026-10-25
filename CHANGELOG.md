@@ -4,6 +4,10 @@ Changes to Job Sprint are recorded here. The initial Git snapshot is `v1.0.0`. E
 
 ## Unreleased
 
+### Celebration
+
+- Clicking **Applied** now fires a short confetti burst. The 1st, 3rd, 5th and 10th application of the day get a bigger burst and a cheer in the toast. Users with reduced-motion turned on see no animation.
+
 ### Networking stage
 
 - Marking a job **Applied** now moves it to a new **Networking** tab instead of History. Each job there has a status: Not networked, 1st pass done, 2nd pass done, Successful, or Stale. Changing it is one click from a dropdown, with a six-second Undo.

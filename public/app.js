@@ -706,6 +706,41 @@ function reopenJob(id) {
   return mutate(id, { network_closed_by: null, network_closed_at: null, updated_at: new Date().toISOString() }, { action: 'reopen' });
 }
 
+// Celebration: a short confetti burst from the Applied button. Skipped for reduced-motion users.
+const CHEER = { 1: 'First one of the day. Nice start.', 3: 'Three today. You’re rolling.', 5: 'Five applications today. Huge.', 10: 'Ten today! Take a bow.' };
+function celebrate(originEl, big) {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const r = originEl.getBoundingClientRect();
+  const cv = document.createElement('canvas');
+  cv.className = 'confetti';
+  cv.width = innerWidth; cv.height = innerHeight;
+  document.body.appendChild(cv);
+  const ctx = cv.getContext('2d');
+  const colors = ['#B5562F', '#E0A07F', '#D9A441', '#6E9F7B', '#7C8FB8', '#F2D9C8'];
+  const n = big ? 160 : 70;
+  const ox = r.left + r.width / 2, oy = r.top + r.height / 2;
+  const bits = Array.from({ length: n }, () => {
+    const a = -Math.PI / 2 + (Math.random() - 0.5) * (big ? 2.6 : 1.8);
+    const v = (big ? 11 : 8) * (0.5 + Math.random());
+    return { x: ox, y: oy, vx: Math.cos(a) * v, vy: Math.sin(a) * v, w: 5 + Math.random() * 5, h: 3 + Math.random() * 4,
+      rot: Math.random() * 6, vr: (Math.random() - 0.5) * 0.4, c: colors[(Math.random() * colors.length) | 0] };
+  });
+  const t0 = performance.now();
+  (function frame(now) {
+    const t = now - t0;
+    ctx.clearRect(0, 0, cv.width, cv.height);
+    for (const b of bits) {
+      b.vy += 0.32; b.vx *= 0.99; b.x += b.vx; b.y += b.vy; b.rot += b.vr;
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, 1 - Math.max(0, t - 900) / 700);
+      ctx.translate(b.x, b.y); ctx.rotate(b.rot);
+      ctx.fillStyle = b.c; ctx.fillRect(-b.w / 2, -b.h / 2, b.w, b.h);
+      ctx.restore();
+    }
+    if (t < 1600) requestAnimationFrame(frame); else cv.remove();
+  })(t0);
+}
+
 function jobLabel(job) { return `${readableText(job.title || 'Role')}${job.company ? ` at ${readableText(job.company)}` : ''}`; }
 
 els.jobList.addEventListener('click', (e) => {
@@ -721,7 +756,9 @@ els.jobList.addEventListener('click', (e) => {
   if (!state.user) return chooseUser();
   if (action === 'apply') {
     setStatus(id, 'applied');
-    showToast(`Applied · moved to Networking: ${jobLabel(job)}`, { undo: () => setStatus(id, 'pipeline') });
+    const today = buckets().appliedToday.length;
+    celebrate(btn, today in CHEER);
+    showToast(CHEER[today] ? `${CHEER[today]} Moved to Networking: ${jobLabel(job)}` : `Applied · moved to Networking: ${jobLabel(job)}`, { undo: () => setStatus(id, 'pipeline') });
   } else if (action === 'block') {
     openBlockModal(job);
   } else if (action === 'done') {
