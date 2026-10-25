@@ -379,8 +379,36 @@ function ageBadge(job) {
 
 const NOTE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
 
+// Company recognition: a colored tile with initials (same company, same color, everywhere) and a bold name.
+const CO_STOPWORDS = new Set(['inc', 'llc', 'ltd', 'corp', 'corporation', 'co', 'company', 'us', 'usa', 'the', 'of', 'and']);
+function companyInitials(name) {
+  const words = String(name || '').replace(/&/g, ' and ').split(/[^A-Za-z0-9]+/).filter(Boolean);
+  const keep = words.filter((w) => !CO_STOPWORDS.has(w.toLowerCase()));
+  const use = keep.length ? keep : words;
+  if (!use.length) return '?';
+  if (use.length === 1) return use[0].length <= 3 ? use[0].toUpperCase() : use[0][0].toUpperCase();
+  return use.slice(0, 3).map((w) => w[0].toUpperCase()).join('');
+}
+function companyHue(name) {
+  const key = (typeof compKey === 'function' ? compKey(name) : '') || String(name || '').toLowerCase();
+  let h = 0;
+  for (const ch of key) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return h % 8;
+}
+function coTile(name, small = false) {
+  const initials = companyInitials(name);
+  return `<span class="co-tile h${companyHue(name)}${small ? ' sm' : ''}${initials.length >= 3 ? ' t3' : ''}" aria-hidden="true">${escapeHtml(initials)}</span>`;
+}
+// Own column on wide screens; on narrow screens the same name moves into the sub-line (see CSS).
+function coCell(job) {
+  const name = job.company || 'Unknown company';
+  return `<div class="co-cell" title="${escapeHtml(readableText(name))}">${coTile(name)}<span class="co-name">${displayHtml(name)}</span></div>`;
+}
 function subLine(job) {
-  return [job.company || 'Unknown company', job.location].filter(Boolean).map(displayHtml).join('<span class="dot">·</span>');
+  const name = job.company || 'Unknown company';
+  const parts = [`<span class="sub-co">${coTile(name, true)}<span>${displayHtml(name)}</span></span>`];
+  if (job.location) { parts.push('<span class="dot sub-co">·</span>'); parts.push(displayHtml(job.location)); }
+  return parts.join('');
 }
 function titleLink(job) {
   return `<a class="job-title" href="${escapeHtml(safeJobUrl(job.url))}" target="_blank" rel="noopener">${displayHtml(job.title || 'Untitled role')}</a>`;
@@ -413,6 +441,7 @@ function openRow(job) {
           ${notePreview(job)}
         </div>
       </div>
+      ${coCell(job)}
       <div class="job-meta">
         <span class="mini-avatar ${userClass(job.added_by)}">${escapeHtml((job.added_by || '?')[0])}</span>
         <span>Added ${relDate(job.added_at)}</span>
@@ -458,6 +487,7 @@ function networkRow(job) {
           ${notePreview(job)}
         </div>
       </div>
+      ${coCell(job)}
       <div class="job-meta stack">
         ${networkSelect(job)}
         <span class="meta-small"><span class="mini-avatar ${userClass(job.applied_by)}">${escapeHtml((job.applied_by || '?')[0])}</span>Applied ${relDate(job.applied_at)}</span>
@@ -491,6 +521,7 @@ function historyRow(job) {
           ${notePreview(job)}
         </div>
       </div>
+      ${coCell(job)}
       <div class="job-meta stack">
         <div class="meta-line">
           <span class="status-chip ${tone}">${label}</span>
@@ -516,7 +547,7 @@ function discoverRow(role) {
   const score = hasScore ? Math.max(0, Math.min(100, Math.round(value))) : 0;
   const scoreTone = !hasScore ? 'score-unknown' : score >= 90 ? 'score-high' : score >= 75 ? 'score-mid' : 'score-low';
   const tier = role.fit_tier === 'S' ? 'S' : 'A';
-  const sub = [role.company, role.location].filter(Boolean).map(displayHtml).join('<span class="dot">·</span>');
+  const sub = [role.company ? `<span class="sub-co always">${coTile(role.company, true)}<span>${displayHtml(role.company)}</span></span>` : '', role.location ? displayHtml(role.location) : ''].filter(Boolean).join('<span class="dot">·</span>');
   const busy = state.discoverBusy.has(role.id) ? ' disabled' : '';
   return `
     <article class="discover-row" data-id="${escapeHtml(role.id)}">
@@ -693,6 +724,7 @@ function companyRow(c) {
       <div class="job-main">
         ${ownerCircle(c)}
         ${coTouchBadge(c)}
+        ${coTile(c.name)}
         <div class="job-text">
           <button class="job-title co-name" data-action="notes">${displayHtml(c.name)}</button>
           <div class="job-sub">${c.source ? displayHtml(c.source) : 'No source'}</div>

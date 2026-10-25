@@ -317,7 +317,7 @@ textarea { resize: vertical; }
 .group-hint { text-transform: none; letter-spacing: 0; font-weight: 500; font-size: 12px; color: var(--text-3); }
 
 .job-row {
-  display: grid; grid-template-columns: minmax(0, 1fr) 240px auto; grid-template-areas: "main meta actions";
+  display: grid; grid-template-columns: minmax(0, 1fr) 176px 196px auto; grid-template-areas: "main co meta actions";
   gap: 16px; align-items: center; padding: 13px 20px; border-bottom: 1px solid var(--border);
   transition: background-color .12s;
   animation: fadein .2s ease-out;
@@ -658,7 +658,7 @@ textarea { resize: vertical; }
   .people-section { max-height: 40vh; padding: 10px 16px 12px; }
   .drawer-foot { padding: 10px 16px; }
   .co-new { margin-left: 0; }
-  .job-row.company .job-meta { padding-left: calc(64px + var(--own-w)); flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+  .job-row.company .job-meta { padding-left: calc(114px + var(--own-w)); flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 }
 
 /* ---------- Row menu ---------- */
@@ -692,3 +692,54 @@ textarea { resize: vertical; }
 .field select { width: 100%; font-weight: 400; color: var(--text); border: 1px solid var(--border-strong); background: var(--surface); border-radius: 10px; padding: 9px 12px; }
 .field select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
 @media (max-width: 720px) { .owner-bar { gap: 6px; } .owner-label { width: 100%; } :root { --own-w: 46px; } .own { width: 36px; height: 36px; font-size: 15px; } }
+
+/* ---------- Company recognition ---------- */
+:root {
+  --h0-bg: #F7E8E0; --h0-fg: #A84E2F; --h0-bd: #EBCBBB;  --h1-bg: #E3EFE6; --h1-fg: #2F6B45; --h1-bd: #C5DECB;
+  --h2-bg: #E4EAF6; --h2-fg: #3F5A9A; --h2-bd: #C9D4EC;  --h3-bg: #F6EBCF; --h3-fg: #8A5A12; --h3-bd: #E8D6A5;
+  --h4-bg: #EFE3F2; --h4-fg: #7A4890; --h4-bd: #DDC8E4;  --h5-bg: #DFF0F0; --h5-fg: #27697A; --h5-bd: #BDDDDF;
+  --h6-bg: #F5E1E6; --h6-fg: #A13F5C; --h6-bd: #E6C3CD;  --h7-bg: #ECECE4; --h7-fg: #5C5C45; --h7-bd: #D8D8CA;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --h0-bg: #3B2A22; --h0-fg: #EBA083; --h0-bd: #55392D;  --h1-bg: #22352A; --h1-fg: #8CC9A0; --h1-bd: #2F4A38;
+    --h2-bg: #252C40; --h2-fg: #9DB4EC; --h2-bd: #344060;  --h3-bg: #3A301A; --h3-fg: #E3BC6A; --h3-bd: #54462A;
+    --h4-bg: #33263A; --h4-fg: #C9A0DC; --h4-bd: #493553;  --h5-bg: #1F3436; --h5-fg: #82C4D1; --h5-bd: #2C4A4D;
+    --h6-bg: #3A242B; --h6-fg: #E39AB0; --h6-bd: #55343E;  --h7-bg: #2D2D27; --h7-fg: #BDBDA3; --h7-bd: #40403A;
+  }
+}
+:root[data-theme="dark"] {
+  --h0-bg: #3B2A22; --h0-fg: #EBA083; --h0-bd: #55392D;  --h1-bg: #22352A; --h1-fg: #8CC9A0; --h1-bd: #2F4A38;
+  --h2-bg: #252C40; --h2-fg: #9DB4EC; --h2-bd: #344060;  --h3-bg: #3A301A; --h3-fg: #E3BC6A; --h3-bd: #54462A;
+  --h4-bg: #33263A; --h4-fg: #C9A0DC; --h4-bd: #493553;  --h5-bg: #1F3436; --h5-fg: #82C4D1; --h5-bd: #2C4A4D;
+  --h6-bg: #3A242B; --h6-fg: #E39AB0; --h6-bd: #55343E;  --h7-bg: #2D2D27; --h7-fg: #BDBDA3; --h7-bd: #40403A;
+}
+.co-tile { flex: none; display: inline-grid; place-items: center; width: 38px; height: 38px; border-radius: 10px; border: 1px solid; font-size: 13px; font-weight: 700; letter-spacing: -.01em; line-height: 1; }
+.co-tile.t3 { font-size: 11.5px; letter-spacing: -.03em; }
+.co-tile.sm { width: 20px; height: 20px; border-radius: 6px; font-size: 9.5px; margin-right: 6px; vertical-align: -5px; }
+.co-tile.sm.t3 { font-size: 8px; }
+.co-tile.h0 { background: var(--h0-bg); color: var(--h0-fg); border-color: var(--h0-bd); } .co-tile.h1 { background: var(--h1-bg); color: var(--h1-fg); border-color: var(--h1-bd); }
+.co-tile.h2 { background: var(--h2-bg); color: var(--h2-fg); border-color: var(--h2-bd); } .co-tile.h3 { background: var(--h3-bg); color: var(--h3-fg); border-color: var(--h3-bd); }
+.co-tile.h4 { background: var(--h4-bg); color: var(--h4-fg); border-color: var(--h4-bd); } .co-tile.h5 { background: var(--h5-bg); color: var(--h5-fg); border-color: var(--h5-bd); }
+.co-tile.h6 { background: var(--h6-bg); color: var(--h6-fg); border-color: var(--h6-bd); } .co-tile.h7 { background: var(--h7-bg); color: var(--h7-fg); border-color: var(--h7-bd); }
+.co-cell { grid-area: co; display: flex; align-items: center; gap: 10px; min-width: 0; }
+.co-name { font-size: 14.5px; font-weight: 600; color: var(--text); line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.sub-co { display: none; align-items: center; color: var(--text-2); font-weight: 600; }
+.sub-co.always { display: inline-flex; }
+.job-sub .sub-co > span:last-child { overflow: hidden; text-overflow: ellipsis; }
+/* Wide screens: company has its own column, so the role can use two lines. */
+@media (min-width: 1001px) {
+  .job-row:not(.company) .job-title { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .job-row.company { grid-template-columns: minmax(0, 1fr) 220px auto; grid-template-areas: "main meta actions"; }
+  .job-sub .co-badge { display: table; margin: 4px 0 0; }
+  .job-row.company .co-name { font-size: 15px; }
+}
+/* Narrower screens: no room for a column, so the company moves into the sub-line under the role. */
+@media (max-width: 1000px) {
+  .co-cell { display: none; }
+  .sub-co { display: inline-flex; }
+  .job-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 0; }
+  .job-sub .dot { margin: 0 6px; }
+  .job-row.company .job-meta { padding-left: calc(102px + var(--own-w)); }
+}
+@media (max-width: 720px) { .co-tile { width: 34px; height: 34px; font-size: 12px; } .co-tile.sm { width: 20px; height: 20px; } }

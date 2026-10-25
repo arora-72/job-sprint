@@ -4,6 +4,13 @@ Changes to Job Sprint are recorded here. The initial Git snapshot is `v1.0.0`. E
 
 ## Unreleased
 
+### Company at a glance
+
+- Each job row has its own **company column** right before "Added", with a colored tile (initials) and the bold company name. The same company always gets the same tile color on every row and tab. Roles can use two lines.
+- On tablets and phones there is no room for a column, so the company moves under the role with a small tile.
+- Companies tab rows and Discover roles show the tile too.
+- No database change.
+
 ### Owners
 
 - Every job and company has an **owner**: Garima, Indresh, or Unassigned. A big profile circle at the left of each row shows it (G, I, or a dashed + when unassigned). Clicking the circle opens a menu to reassign, with a six-second Undo.
