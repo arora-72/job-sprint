@@ -123,14 +123,20 @@
         <span class="stat-value" id="statBacklogValue">0</span>
         <span class="stat-sub" id="statBacklogSub">From before today</span>
       </button>
+      <button class="stat networking" data-view="networking" id="statNetworking">
+        <span class="stat-label">Networking</span>
+        <span class="stat-value" id="statNetworkingValue">0</span>
+        <span class="stat-sub" id="statNetworkingSub">Applied, still networking</span>
+      </button>
     </section>
 
     <section class="workspace">
       <div class="workspace-head">
         <div class="tabs" role="tablist">
           <button class="tab active" role="tab" aria-selected="true" data-tab="open">To apply <span id="openCount" class="count-badge">0</span></button>
-          <button class="tab" role="tab" aria-selected="false" data-tab="discover">Discover <span id="discoverCount" class="count-badge">0</span></button>
+          <button class="tab" role="tab" aria-selected="false" data-tab="networking">Networking <span id="networkingCount" class="count-badge">0</span></button>
           <button class="tab" role="tab" aria-selected="false" data-tab="history">History <span id="historyCount" class="count-badge">0</span></button>
+          <button class="tab" role="tab" aria-selected="false" data-tab="discover">Discover <span id="discoverCount" class="count-badge">0</span></button>
         </div>
         <div class="head-right">
           <button id="filterChip" class="filter-chip hidden" aria-label="Clear filter"><span id="filterChipText"></span><span aria-hidden="true">×</span></button>
@@ -148,6 +154,27 @@
       <div id="jobList" class="job-list"></div>
     </section>
   </main>
+
+  <!-- Notes for one job: a running log, newest first -->
+  <div id="notesBackdrop" class="drawer-backdrop hidden"></div>
+  <aside id="notesDrawer" class="drawer hidden" role="dialog" aria-modal="true" aria-labelledby="notesTitle">
+    <div class="drawer-head">
+      <div class="drawer-head-text">
+        <span class="eyebrow-sm">Notes</span>
+        <h2 id="notesTitle">Job</h2>
+        <p id="notesSub" class="drawer-sub"></p>
+      </div>
+      <button class="icon-btn" id="closeNotes" aria-label="Close notes">×</button>
+    </div>
+    <form id="noteForm" class="note-form" novalidate>
+      <textarea id="noteInput" rows="3" maxlength="1000" placeholder="Add a note: who you reached out to, what they said, next step…" aria-label="New note"></textarea>
+      <div class="note-form-foot">
+        <span class="note-hint">Enter to save · Shift+Enter for a new line</span>
+        <button id="saveNote" class="btn primary small" type="submit">Add note</button>
+      </div>
+    </form>
+    <div id="notesList" class="notes-list" aria-live="polite"></div>
+  </aside>
 
   <div id="toast" class="toast hidden" role="status">
     <span id="toastText"></span>

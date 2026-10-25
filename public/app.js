@@ -21,8 +21,10 @@ const state = {
   discoverLoaded: false,
   discoverError: null,
   discoverBusy: new Set(),
-  tab: 'open',          // 'open' | 'discover' | 'history'
+  tab: 'open',          // 'open' | 'networking' | 'history' | 'discover'
   filter: null,         // null | 'today' | 'backlog' | 'applied-today'
+  historyFilter: 'all', // 'all' | 'successful' | 'stale' | 'blocked'
+  notesJobId: null,     // job whose notes drawer is open
   pendingBlockId: null,
   preview: null,        // { url, token }
   lastSync: null,
@@ -41,10 +43,12 @@ const els = {};
   'addPanel', 'addPanelUrl', 'parseConfidence', 'parseStatus', 'dupWarning', 'previewForm',
   'titleInput', 'companyInput', 'locationInput', 'cancelPreview', 'saveJob',
   'statOpenValue', 'statOpenSub', 'statAppliedValue', 'statAppliedSub', 'statTodayValue', 'statTodaySub',
-  'statBacklog', 'statBacklogValue', 'statBacklogSub', 'openCount', 'discoverCount', 'historyCount',
+  'statBacklog', 'statBacklogValue', 'statBacklogSub', 'statNetworking', 'statNetworkingValue', 'statNetworkingSub',
+  'openCount', 'networkingCount', 'discoverCount', 'historyCount',
   'filterChip', 'filterChipText', 'syncText', 'refreshBtn', 'loadingState', 'emptyState', 'emptyIcon',
   'emptyTitle', 'emptyText', 'jobList', 'toast', 'toastText', 'toastUndo',
   'blockModal', 'blockJobName', 'blockReason', 'closeBlockModal', 'cancelBlock', 'confirmBlock', 'reasonChips',
+  'notesBackdrop', 'notesDrawer', 'notesTitle', 'notesSub', 'closeNotes', 'noteForm', 'noteInput', 'saveNote', 'notesList',
 ].forEach((id) => { els[id] = $(id); });
 
 function userClass(name) { return name === 'Garima' ? 'u-g' : name === 'Indresh' ? 'u-i' : ''; }
@@ -221,17 +225,44 @@ function scheduleAutoRefresh() {
   }, REFRESH_MS);
 }
 
-/* ---------- Derived numbers ---------- */
-const doneAt = (j) => j.applied_at || j.blocked_at || j.updated_at;
+/* ---------- Stages ---------- */
+// Which tab a job belongs in is derived from its fields (mirrors supabase/networking.sql):
+//   pipeline -> To apply · applied and not closed -> Networking · blocked or closed -> History
+const NETWORK = {
+  not_networked: { label: 'Not networked', short: 'Not networked' },
+  first_pass: { label: '1st pass done', short: '1st pass' },
+  second_pass: { label: '2nd pass done', short: '2nd pass' },
+  successful: { label: 'Successful', short: 'Successful' },
+  stale: { label: 'Stale', short: 'Stale' },
+};
+const NETWORK_ORDER = Object.keys(NETWORK);
+const NETWORK_DONE = new Set(['successful', 'stale']);
+const NUDGE_DAYS = 5;
+
+function stageOf(job) {
+  if (job.status === 'pipeline') return 'open';
+  if (job.status === 'applied' && !job.network_closed_at) return 'networking';
+  return 'history';
+}
+function netStatus(job) { return NETWORK[job.network_status] ? job.network_status : 'not_networked'; }
+function lastTouch(job) { return job.network_updated_at || job.applied_at || job.added_at; }
+function closedAt(job) { return job.network_closed_at || job.blocked_at || job.applied_at || job.updated_at; }
+function outcomeOf(job) { return job.status === 'blocked' ? 'blocked' : netStatus(job); }
+function notesOf(job) { return Array.isArray(job.notes) ? job.notes : []; }
+
 function buckets() {
   const t0 = startOfToday();
-  const open = state.jobs.filter((j) => j.status === 'pipeline');
+  const byStage = { open: [], networking: [], history: [] };
+  state.jobs.forEach((j) => byStage[stageOf(j)].push(j));
+  const open = byStage.open;
   const backlog = open.filter((j) => new Date(j.added_at) < t0).sort((a, b) => new Date(a.added_at) - new Date(b.added_at));
   const today = open.filter((j) => new Date(j.added_at) >= t0).sort((a, b) => new Date(b.added_at) - new Date(a.added_at));
-  const history = state.jobs.filter((j) => j.status !== 'pipeline').sort((a, b) => new Date(doneAt(b)) - new Date(doneAt(a)));
-  const appliedToday = history.filter((j) => j.status === 'applied' && new Date(j.applied_at) >= t0);
+  // Least recently touched first, so neglected jobs rise to the top.
+  const networking = byStage.networking.sort((a, b) => new Date(lastTouch(a)) - new Date(lastTouch(b)));
+  const history = byStage.history.sort((a, b) => new Date(closedAt(b)) - new Date(closedAt(a)));
+  const appliedToday = state.jobs.filter((j) => j.status === 'applied' && new Date(j.applied_at) >= t0);
   const addedToday = state.jobs.filter((j) => new Date(j.added_at) >= t0);
-  return { open, backlog, today, history, appliedToday, addedToday };
+  return { open, backlog, today, networking, history, appliedToday, addedToday };
 }
 
 /* ---------- Rendering ---------- */
@@ -241,16 +272,39 @@ function ageBadge(job) {
   return `<span class="age ${age >= 5 ? 'old' : ''}" title="Added ${age} day${age === 1 ? '' : 's'} ago">${age}d</span>`;
 }
 
+const NOTE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+
+function subLine(job) {
+  return [job.company || 'Unknown company', job.location].filter(Boolean).map(displayHtml).join('<span class="dot">·</span>');
+}
+function titleLink(job) {
+  return `<a class="job-title" href="${escapeHtml(safeJobUrl(job.url))}" target="_blank" rel="noopener">${displayHtml(job.title || 'Untitled role')}</a>`;
+}
+function notePreview(job) {
+  const notes = notesOf(job);
+  const last = notes[notes.length - 1];
+  if (!last) return '';
+  return `<button class="note-preview" data-action="notes" title="Open notes">
+    <span class="note-preview-text">${displayHtml(last.text)}</span><span class="note-preview-meta">${escapeHtml((last.by || '?')[0])} · ${relDate(last.at)}</span>
+  </button>`;
+}
+function notesButton(job) {
+  const n = notesOf(job).length;
+  return `<button class="btn ghost small notes-btn${n ? ' has-notes' : ''}" data-action="notes" aria-label="Notes${n ? ` (${n})` : ''}" title="Notes">${NOTE_ICON}${n ? `<span>${n}</span>` : ''}</button>`;
+}
+function openLink(job) {
+  return `<a class="btn ghost small" href="${escapeHtml(safeJobUrl(job.url))}" target="_blank" rel="noopener">Open ↗</a>`;
+}
+
 function openRow(job) {
-  const url = escapeHtml(safeJobUrl(job.url));
-  const sub = [job.company || 'Unknown company', job.location].filter(Boolean).map(displayHtml).join('<span class="dot">·</span>');
   return `
     <article class="job-row" data-id="${escapeHtml(job.id)}">
       <div class="job-main">
         ${ageBadge(job)}
         <div class="job-text">
-          <a class="job-title" href="${url}" target="_blank" rel="noopener">${displayHtml(job.title || 'Untitled role')}</a>
-          <div class="job-sub">${sub}</div>
+          ${titleLink(job)}
+          <div class="job-sub">${subLine(job)}</div>
+          ${notePreview(job)}
         </div>
       </div>
       <div class="job-meta">
@@ -258,37 +312,87 @@ function openRow(job) {
         <span>Added ${relDate(job.added_at)}</span>
       </div>
       <div class="actions">
-        <a class="btn ghost small" href="${url}" target="_blank" rel="noopener">Open ↗</a>
+        ${notesButton(job)}
+        ${openLink(job)}
         <button class="btn secondary small" data-action="block">Block</button>
         <button class="btn primary small" data-action="apply">Applied ✓</button>
       </div>
     </article>`;
 }
 
+function touchBadge(job) {
+  const status = netStatus(job);
+  const age = Math.max(0, daysOld(lastTouch(job)));
+  const nudge = !NETWORK_DONE.has(status) && age >= NUDGE_DAYS;
+  const what = job.network_updated_at ? 'Last networking update' : 'Applied';
+  const title = `${what} ${age === 0 ? 'today' : `${age} day${age === 1 ? '' : 's'} ago`}${nudge ? '. Time for a nudge.' : ''}`;
+  return `<span class="age ${nudge ? '' : 'new'}" title="${escapeHtml(title)}">${age === 0 ? 'Today' : `${age}d`}</span>`;
+}
+
+function networkSelect(job) {
+  const current = netStatus(job);
+  const options = NETWORK_ORDER.map((key) => `<option value="${key}"${key === current ? ' selected' : ''}>${NETWORK[key].label}</option>`).join('');
+  return `<label class="net-select-wrap s-${current}">
+    <span class="sr-only">Networking status</span>
+    <select class="net-select" data-net-select aria-label="Networking status">${options}</select>
+  </label>`;
+}
+
+function networkRow(job) {
+  const ready = NETWORK_DONE.has(netStatus(job));
+  return `
+    <article class="job-row networking${ready ? ' is-ready' : ''}" data-id="${escapeHtml(job.id)}">
+      <div class="job-main">
+        ${touchBadge(job)}
+        <div class="job-text">
+          ${titleLink(job)}
+          <div class="job-sub">${subLine(job)}</div>
+          ${notePreview(job)}
+        </div>
+      </div>
+      <div class="job-meta stack">
+        ${networkSelect(job)}
+        <span class="meta-small"><span class="mini-avatar ${userClass(job.applied_by)}">${escapeHtml((job.applied_by || '?')[0])}</span>Applied ${relDate(job.applied_at)}</span>
+      </div>
+      <div class="actions">
+        ${notesButton(job)}
+        ${openLink(job)}
+        <button class="btn ${ready ? 'primary' : 'secondary'} small" data-action="done" title="Move to History">Done → History</button>
+      </div>
+    </article>`;
+}
+
+const OUTCOME_CHIP = {
+  successful: ['applied', 'Successful'], stale: ['stale', 'Stale'], blocked: ['blocked', 'Blocked'],
+  not_networked: ['neutral', 'Not networked'], first_pass: ['neutral', '1st pass'], second_pass: ['neutral', '2nd pass'],
+};
+
 function historyRow(job) {
-  const url = escapeHtml(safeJobUrl(job.url));
-  const applied = job.status === 'applied';
-  const who = applied ? job.applied_by : job.blocked_by;
-  const when = applied ? job.applied_at : job.blocked_at;
-  const sub = [job.company || 'Unknown company', job.location].filter(Boolean).map(displayHtml).join('<span class="dot">·</span>');
+  const blocked = job.status === 'blocked';
+  const [tone, label] = OUTCOME_CHIP[outcomeOf(job)];
+  const who = blocked ? job.blocked_by : (job.network_closed_by || job.applied_by);
+  const when = blocked ? job.blocked_at : (job.network_closed_at || job.applied_at);
   return `
     <article class="job-row history" data-id="${escapeHtml(job.id)}">
       <div class="job-main">
         <div class="job-text">
-          <a class="job-title" href="${url}" target="_blank" rel="noopener">${displayHtml(job.title || 'Untitled role')}</a>
-          <div class="job-sub">${sub}</div>
+          ${titleLink(job)}
+          <div class="job-sub">${subLine(job)}</div>
+          ${notePreview(job)}
         </div>
       </div>
       <div class="job-meta stack">
         <div class="meta-line">
-          <span class="status-chip ${applied ? 'applied' : 'blocked'}">${applied ? 'Applied' : 'Blocked'}</span>
+          <span class="status-chip ${tone}">${label}</span>
           <span>${escapeHtml(who || 'Unknown')} · ${relDate(when)}</span>
         </div>
-        ${!applied && job.blocked_reason ? `<div class="reason">${displayHtml(job.blocked_reason)}</div>` : ''}
+        ${blocked && job.blocked_reason ? `<div class="reason">${displayHtml(job.blocked_reason)}</div>` : ''}
+        ${!blocked && job.applied_at ? `<div class="reason">Applied ${relDate(job.applied_at)}</div>` : ''}
       </div>
       <div class="actions">
-        <a class="btn ghost small" href="${url}" target="_blank" rel="noopener">Open ↗</a>
-        <button class="btn secondary small" data-action="restore">Move back</button>
+        ${notesButton(job)}
+        ${openLink(job)}
+        <button class="btn secondary small" data-action="restore" title="${blocked ? 'Back to To apply' : 'Back to Networking'}">Move back</button>
       </div>
     </article>`;
 }
@@ -336,11 +440,11 @@ function group(title, hint, cls, rows) {
 }
 
 const FILTER_LABELS = { today: 'Added today', backlog: 'Backlog only', 'applied-today': 'Applied today' };
+const HISTORY_FILTERS = [['all', 'All'], ['successful', 'Successful'], ['stale', 'Stale'], ['blocked', 'Blocked']];
 
-function render() {
-  const b = buckets();
+function plural(n, word) { return `${n} ${word}${n === 1 ? '' : 's'}`; }
 
-  // Stat tiles
+function renderTiles(b) {
   els.statOpenValue.textContent = b.open.length;
   els.statOpenSub.textContent = b.open.length ? `${b.today.length} new · ${b.backlog.length} backlog` : 'Nothing open';
 
@@ -361,13 +465,87 @@ function render() {
     els.statBacklogSub.textContent = 'All clear from earlier days';
   }
 
-  const view = state.tab === 'history' ? (state.filter === 'applied-today' ? 'applied-today' : 'history') : state.tab === 'discover' ? 'discover' : (state.filter || 'open');
+  const net = b.networking;
+  const notStarted = net.filter((j) => netStatus(j) === 'not_networked').length;
+  const ready = net.filter((j) => NETWORK_DONE.has(netStatus(j))).length;
+  const nudge = net.filter((j) => !NETWORK_DONE.has(netStatus(j)) && daysOld(lastTouch(j)) >= NUDGE_DAYS).length;
+  els.statNetworkingValue.textContent = net.length;
+  const parts = [];
+  if (notStarted) parts.push(`${notStarted} not started`);
+  if (nudge) parts.push(`${nudge} need a nudge`);
+  if (ready) parts.push(`${ready} ready to close`);
+  els.statNetworkingSub.textContent = net.length ? (parts.join(' · ') || 'All in progress') : 'Applied jobs land here';
+}
+
+function renderOpen(b) {
+  let html = '';
+  const showBacklog = state.filter !== 'today' && b.backlog.length;
+  const showToday = state.filter !== 'backlog' && b.today.length;
+  if (showBacklog) html += group('Backlog', `${b.backlog.length} from earlier days · oldest first`, 'backlog', b.backlog.map(openRow).join(''));
+  if (showToday) html += group('Added today', `${b.today.length} open · newest first`, '', b.today.map(openRow).join(''));
+  if (html) return { html };
+  if (state.filter === 'backlog') return { empty: ['✓', 'Backlog cleared', 'Nothing left over from earlier days.', true] };
+  if (state.filter === 'today') return { empty: ['✓', 'Nothing left from today', 'Paste a job link at the top to add one.', true] };
+  return { empty: ['↗', 'Pipeline is empty', 'Paste a job link at the top, or anywhere on this page.', false] };
+}
+
+function renderNetworking(b) {
+  const t0 = startOfToday();
+  const list = state.filter === 'applied-today' ? b.networking.filter((j) => new Date(j.applied_at) >= t0) : b.networking;
+  const groups = [
+    ['not_networked', 'Not networked', 'Start here · longest waiting first', ''],
+    ['first_pass', '1st pass done', 'Follow up with a second pass', ''],
+    ['second_pass', '2nd pass done', 'Waiting to hear back', ''],
+  ];
+  let html = '';
+  groups.forEach(([key, title, hint, cls]) => {
+    const rows = list.filter((j) => netStatus(j) === key);
+    if (rows.length) html += group(`${title} · ${rows.length}`, hint, cls, rows.map(networkRow).join(''));
+  });
+  const ready = list.filter((j) => NETWORK_DONE.has(netStatus(j)));
+  if (ready.length) html += group(`Ready to close · ${ready.length}`, 'Click Done to move to History', 'ready', ready.map(networkRow).join(''));
+  if (html) return { html };
+  if (state.filter === 'applied-today') return { empty: ['0', 'No applications yet today', 'Hit “Applied ✓” on a job and it lands here.', false] };
+  return { empty: ['✓', 'Nothing to network on', 'When you mark a job Applied ✓, it moves here so you can reach out.', true] };
+}
+
+function renderHistory(b) {
+  const f = state.historyFilter;
+  const list = f === 'all' ? b.history : b.history.filter((j) => outcomeOf(j) === f);
+  const chips = b.history.length ? `<div class="subfilters" role="group" aria-label="Filter history">${HISTORY_FILTERS.map(([key, label]) => {
+    const n = key === 'all' ? b.history.length : b.history.filter((j) => outcomeOf(j) === key).length;
+    return `<button class="subfilter${key === f ? ' active' : ''}" data-hfilter="${key}" aria-pressed="${key === f}">${label} <span>${n}</span></button>`;
+  }).join('')}</div>` : '';
+  if (list.length) return { html: chips + list.map(historyRow).join('') };
+  if (b.history.length) return { html: chips, empty: ['–', `No ${f} jobs`, 'Try another filter.', false] };
+  return { empty: ['↗', 'No history yet', 'Blocked jobs and jobs you finish networking on land here.', false] };
+}
+
+function renderDiscover() {
+  const html = state.discoverLoaded ? state.discover.map(discoverRow).join('') : '<div class="state-card">Loading matches…</div>';
+  if (html) return { html };
+  return {
+    empty: state.discoverError
+      ? ['!', 'Couldn’t load Discover', 'Refresh to try again.', false]
+      : ['✦', 'No S or A matches to review', 'New matches from Garima’s role watches will appear here.', true],
+  };
+}
+
+function render() {
+  const b = buckets();
+  renderTiles(b);
+
+  const view = state.tab === 'open' ? (state.filter || 'open')
+    : state.tab === 'networking' ? (state.filter === 'applied-today' ? 'applied-today' : 'networking')
+      : state.tab;
   document.querySelectorAll('.stat').forEach((s) => s.classList.toggle('active', s.dataset.view === view));
 
   // Tabs + filter chip
   els.openCount.textContent = b.open.length;
+  els.networkingCount.textContent = b.networking.length;
   els.discoverCount.textContent = state.discover.length;
   els.historyCount.textContent = b.history.length;
+  if (typeof syncTabFade === 'function') requestAnimationFrame(syncTabFade);
   document.querySelectorAll('.tab').forEach((t) => {
     const on = t.dataset.tab === state.tab;
     t.classList.toggle('active', on);
@@ -383,31 +561,8 @@ function render() {
   els.syncText.classList.toggle('sync-error', state.refreshError);
 
   // List
-  let html = '';
-  let empty = null;
-  if (state.tab === 'open') {
-    const showBacklog = state.filter !== 'today' && b.backlog.length;
-    const showToday = state.filter !== 'backlog' && b.today.length;
-    if (showBacklog) html += group('Backlog', `${b.backlog.length} from earlier days · oldest first`, 'backlog', b.backlog.map(openRow).join(''));
-    if (showToday) html += group('Added today', `${b.today.length} open · newest first`, '', b.today.map(openRow).join(''));
-    if (!html) {
-      if (state.filter === 'backlog') empty = ['✓', 'Backlog cleared', 'Nothing left over from earlier days.', true];
-      else if (state.filter === 'today') empty = ['✓', 'Nothing left from today', 'Paste a job link at the top to add one.', true];
-      else empty = ['↗', 'Pipeline is empty', 'Paste a job link at the top, or anywhere on this page.', false];
-    }
-  } else if (state.tab === 'discover') {
-    html = state.discoverLoaded ? state.discover.map(discoverRow).join('') : '<div class="state-card">Loading matches…</div>';
-    if (!html) empty = state.discoverError
-      ? ['!', 'Couldn’t load Discover', 'Refresh to try again.', false]
-      : ['✦', 'No S or A matches to review', 'New matches from Garima’s role watches will appear here.', true];
-  } else {
-    const list = state.filter === 'applied-today' ? b.appliedToday : b.history;
-    html = list.map(historyRow).join('');
-    if (!html) empty = state.filter === 'applied-today'
-      ? ['0', 'No applications yet today', 'Hit “Applied ✓” on a job and it shows up here.', false]
-      : ['↗', 'No history yet', 'Applied and blocked jobs land here.', false];
-  }
-
+  const renderers = { open: renderOpen, networking: renderNetworking, history: renderHistory, discover: renderDiscover };
+  const { html = '', empty = null } = renderers[state.tab](b);
   els.jobList.innerHTML = html;
   const showEmpty = !!empty && (state.tab === 'discover' ? state.discoverLoaded : state.loadedOnce);
   els.emptyState.classList.toggle('hidden', !showEmpty);
@@ -417,21 +572,36 @@ function render() {
     els.emptyTitle.textContent = empty[1];
     els.emptyText.textContent = empty[2];
   }
+  if (state.notesJobId) renderNotes();
 }
 
 function setView(tab, filter = null) {
+  const changed = state.tab !== tab;
   state.tab = tab;
   state.filter = filter;
   render();
+  if (changed) document.querySelector(`.tab[data-tab="${tab}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  syncTabFade();
   if (tab === 'discover' && !state.discoverLoaded && !state.refreshPromise) refreshAll({ silent: true });
 }
 document.querySelectorAll('.stat').forEach((s) => s.addEventListener('click', () => {
   const v = s.dataset.view;
   if (v === 'open') setView('open');
-  else if (v === 'applied-today') setView('history', 'applied-today');
+  else if (v === 'networking') setView('networking');
+  else if (v === 'applied-today') setView('networking', 'applied-today');
   else setView('open', v);
 }));
 document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => setView(t.dataset.tab)));
+
+// On narrow screens the tabs scroll sideways; fade whichever edge has more tabs behind it.
+const tabsEl = document.querySelector('.tabs');
+function syncTabFade() {
+  const max = tabsEl.scrollWidth - tabsEl.clientWidth;
+  tabsEl.classList.toggle('can-scroll-left', max > 2 && tabsEl.scrollLeft > 2);
+  tabsEl.classList.toggle('can-scroll-right', max > 2 && tabsEl.scrollLeft < max - 2);
+}
+tabsEl.addEventListener('scroll', syncTabFade, { passive: true });
+window.addEventListener('resize', syncTabFade);
 els.filterChip.addEventListener('click', () => setView(state.tab));
 els.refreshBtn.addEventListener('click', () => { refreshAll(); });
 
@@ -468,25 +638,28 @@ els.jobList.addEventListener('click', async (event) => {
   }
 });
 
-/* ---------- Status changes (optimistic, with undo) ---------- */
+/* ---------- Changes (optimistic, with undo) ---------- */
+const CLEARED_NETWORK = { network_status: null, network_updated_by: null, network_updated_at: null, network_closed_by: null, network_closed_at: null };
+
 function localPatch(status, reason) {
   const now = new Date().toISOString();
-  if (status === 'applied') return { status, applied_by: state.user, applied_at: now, updated_at: now };
-  if (status === 'blocked') return { status, blocked_by: state.user, blocked_at: now, blocked_reason: reason, updated_at: now };
-  return { status, applied_by: null, applied_at: null, blocked_by: null, blocked_at: null, blocked_reason: '', updated_at: now };
+  if (status === 'applied') return { status, applied_by: state.user, applied_at: now, ...CLEARED_NETWORK, network_status: 'not_networked', updated_at: now };
+  if (status === 'blocked') return { status, blocked_by: state.user, blocked_at: now, blocked_reason: reason, ...CLEARED_NETWORK, updated_at: now };
+  return { status, applied_by: null, applied_at: null, blocked_by: null, blocked_at: null, blocked_reason: '', ...CLEARED_NETWORK, updated_at: now };
 }
 
-function setStatus(id, status, reason = '') {
+// Apply a change locally right away, then save it. Saves for one job run in order; a failure rolls back.
+function mutate(id, local, body) {
   const job = state.jobs.find((j) => j.id === id);
-  if (!job) return;
-  const before = { ...job };
-  Object.assign(job, localPatch(status, reason));
+  if (!job) return Promise.resolve(null);
+  const before = { ...job, notes: [...notesOf(job)] };
+  if (local) Object.assign(job, typeof local === 'function' ? local(job) : local);
   render();
 
   const prev = state.inflight.get(id) || Promise.resolve();
   const next = prev.catch(() => {}).then(() => api('jobs', {
     method: 'PATCH',
-    body: JSON.stringify({ id, status, actor: state.user, blocked_reason: reason }),
+    body: JSON.stringify({ id, actor: state.user, ...body }),
   }));
   state.inflight.set(id, next);
   let saved = false;
@@ -509,29 +682,162 @@ function setStatus(id, status, reason = '') {
         refreshAll({ silent: true, afterAction: true });
       }
     });
+  return next;
+}
+
+function setStatus(id, status, reason = '') {
+  return mutate(id, localPatch(status, reason), { action: 'status', status, blocked_reason: reason });
+}
+
+function setNetwork(id, networkStatus, restore = null) {
+  const now = new Date().toISOString();
+  const local = restore
+    ? { network_status: networkStatus, network_updated_by: restore.by, network_updated_at: restore.at, updated_at: now }
+    : { network_status: networkStatus, network_updated_by: state.user, network_updated_at: now, updated_at: now };
+  return mutate(id, local, { action: 'network', network_status: networkStatus, ...(restore ? { restore } : {}) });
+}
+
+function closeJob(id) {
+  const now = new Date().toISOString();
+  return mutate(id, { network_closed_by: state.user, network_closed_at: now, updated_at: now }, { action: 'close' });
+}
+
+function reopenJob(id) {
+  return mutate(id, { network_closed_by: null, network_closed_at: null, updated_at: new Date().toISOString() }, { action: 'reopen' });
 }
 
 function jobLabel(job) { return `${readableText(job.title || 'Role')}${job.company ? ` at ${readableText(job.company)}` : ''}`; }
 
 els.jobList.addEventListener('click', (e) => {
+  const hf = e.target.closest('[data-hfilter]');
+  if (hf) { state.historyFilter = hf.dataset.hfilter; render(); return; }
   const btn = e.target.closest('[data-action]');
   if (!btn) return;
-  const id = btn.closest('.job-row').dataset.id;
+  const id = btn.closest('.job-row')?.dataset.id;
   const job = state.jobs.find((j) => j.id === id);
   if (!job) return;
-  if (!state.user) return chooseUser();
   const action = btn.dataset.action;
+  if (action === 'notes') { openNotes(id); return; }
+  if (!state.user) return chooseUser();
   if (action === 'apply') {
     setStatus(id, 'applied');
-    showToast(`Applied: ${jobLabel(job)}`, { undo: () => setStatus(id, 'pipeline') });
+    showToast(`Applied · moved to Networking: ${jobLabel(job)}`, { undo: () => setStatus(id, 'pipeline') });
   } else if (action === 'block') {
     openBlockModal(job);
+  } else if (action === 'done') {
+    const outcome = NETWORK[netStatus(job)].label;
+    closeJob(id);
+    showToast(`Moved to History (${outcome}): ${jobLabel(job)}`, { undo: () => reopenJob(id) });
   } else if (action === 'restore') {
-    const prevStatus = job.status;
-    const prevReason = job.blocked_reason || '';
-    setStatus(id, 'pipeline');
-    showToast(`Moved back: ${jobLabel(job)}`, { undo: () => setStatus(id, prevStatus, prevReason) });
+    if (job.status === 'blocked') {
+      const prevReason = job.blocked_reason || '';
+      setStatus(id, 'pipeline');
+      showToast(`Back in To apply: ${jobLabel(job)}`, { undo: () => setStatus(id, 'blocked', prevReason) });
+    } else {
+      reopenJob(id);
+      showToast(`Back in Networking: ${jobLabel(job)}`, { undo: () => closeJob(id) });
+    }
   }
+});
+
+// Networking status dropdown: one change = saved, with undo.
+els.jobList.addEventListener('change', (e) => {
+  const select = e.target.closest('[data-net-select]');
+  if (!select) return;
+  const id = select.closest('.job-row')?.dataset.id;
+  const job = state.jobs.find((j) => j.id === id);
+  if (!job) return;
+  if (!state.user) { select.value = netStatus(job); chooseUser(); return; }
+  const prev = { status: netStatus(job), by: job.network_updated_by || null, at: job.network_updated_at || null };
+  const next = select.value;
+  if (next === prev.status) return;
+  setNetwork(id, next);
+  const hint = NETWORK_DONE.has(next) ? ' · click Done when finished' : '';
+  showToast(`${NETWORK[next].label}${hint}`, { undo: () => setNetwork(id, prev.status, { by: prev.by, at: prev.at }) });
+});
+
+/* ---------- Notes drawer ---------- */
+// Escape everything, turning only http(s) links into anchors.
+function linkify(raw) {
+  const re = /\bhttps?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)\]]/g;
+  let out = '';
+  let last = 0;
+  for (const m of raw.matchAll(re)) {
+    out += escapeHtml(raw.slice(last, m.index));
+    const url = escapeHtml(m[0]);
+    out += `<a href="${url}" target="_blank" rel="noopener">${url}</a>`;
+    last = m.index + m[0].length;
+  }
+  return out + escapeHtml(raw.slice(last));
+}
+
+function renderNotes() {
+  const job = state.jobs.find((j) => j.id === state.notesJobId);
+  if (!job) { closeNotes(); return; }
+  els.notesTitle.textContent = readableText(job.title || 'Untitled role');
+  const stageLabel = { open: 'To apply', networking: `Networking · ${NETWORK[netStatus(job)].label}`, history: 'History' }[stageOf(job)];
+  els.notesSub.textContent = [readableText(job.company || ''), stageLabel].filter(Boolean).join(' · ');
+  const notes = [...notesOf(job)].reverse();
+  els.notesList.innerHTML = notes.length ? notes.map((n) => `
+    <div class="note${n.pending ? ' pending' : ''}" data-note-id="${escapeHtml(n.id)}">
+      <div class="note-head">
+        <span class="mini-avatar ${userClass(n.by)}">${escapeHtml((n.by || '?')[0])}</span>
+        <strong>${escapeHtml(n.by || 'Unknown')}</strong>
+        <span class="note-when" title="${escapeHtml(n.at ? new Date(n.at).toLocaleString() : '')}">${n.pending ? 'Saving…' : relDate(n.at)}</span>
+        ${n.pending ? '' : '<button class="note-delete" data-note-delete>Delete</button>'}
+      </div>
+      <p class="note-text">${linkify(readableText(n.text))}</p>
+    </div>`).join('')
+    : '<div class="notes-empty">No notes yet. Log who you contacted, what they said, and what comes next.</div>';
+}
+
+function openNotes(id) {
+  state.notesJobId = id;
+  renderNotes();
+  els.notesBackdrop.classList.remove('hidden');
+  els.notesDrawer.classList.remove('hidden');
+  els.noteInput.value = '';
+  setTimeout(() => els.noteInput.focus(), 30);
+}
+function closeNotes() {
+  state.notesJobId = null;
+  els.notesBackdrop.classList.add('hidden');
+  els.notesDrawer.classList.add('hidden');
+}
+function addNote() {
+  const id = state.notesJobId;
+  const text = els.noteInput.value.trim();
+  if (!id || !text) { els.noteInput.focus(); return; }
+  if (!state.user) { chooseUser(); return; }
+  if (text.length > 1000) { showToast('Notes can be up to 1,000 characters.', { error: true }); return; }
+  const temp = { id: `pending-${Date.now()}`, text, by: state.user, at: new Date().toISOString(), pending: true };
+  els.noteInput.value = '';
+  mutate(id, (job) => ({ notes: [...notesOf(job), temp] }), { action: 'add-note', text });
+}
+function deleteNote(noteId, button) {
+  const id = state.notesJobId;
+  if (!id) return;
+  // Two-step delete: first click asks, second click deletes.
+  if (button.dataset.confirm !== 'yes') {
+    button.dataset.confirm = 'yes';
+    button.textContent = 'Delete?';
+    button.classList.add('confirming');
+    setTimeout(() => { if (button.isConnected) { button.dataset.confirm = ''; button.textContent = 'Delete'; button.classList.remove('confirming'); } }, 3000);
+    return;
+  }
+  if (!state.user) { chooseUser(); return; }
+  mutate(id, (job) => ({ notes: notesOf(job).filter((n) => n.id !== noteId) }), { action: 'delete-note', note_id: noteId });
+}
+
+els.closeNotes.addEventListener('click', closeNotes);
+els.notesBackdrop.addEventListener('click', closeNotes);
+els.noteForm.addEventListener('submit', (e) => { e.preventDefault(); addNote(); });
+els.noteInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); addNote(); }
+});
+els.notesList.addEventListener('click', (e) => {
+  const del = e.target.closest('[data-note-delete]');
+  if (del) deleteNote(del.closest('.note').dataset.noteId, del);
 });
 
 /* ---------- Block dialog ---------- */
@@ -604,7 +910,7 @@ async function startAdd(raw) {
 
   const dup = findDuplicate(url);
   if (dup) {
-    const where = dup.status === 'pipeline' ? 'already in the pipeline' : `already ${dup.status}`;
+    const where = { open: 'already in To apply', networking: 'already in Networking', history: 'already in History' }[stageOf(dup)];
     els.dupWarning.textContent = `Heads up: “${jobLabel(dup)}” is ${where}. ${dup.added_by} added it ${relDate(dup.added_at)}.`;
     els.dupWarning.classList.remove('hidden');
     els.saveJob.innerHTML = 'Save anyway';
@@ -689,7 +995,7 @@ els.jobUrl.addEventListener('paste', (e) => {
 // Pasting a link anywhere on the page does the same.
 document.addEventListener('paste', (e) => {
   if (e.target.closest && e.target.closest('input, textarea, [contenteditable]')) return;
-  if (!els.userModal.classList.contains('hidden') || !els.blockModal.classList.contains('hidden')) return;
+  if (!els.userModal.classList.contains('hidden') || !els.blockModal.classList.contains('hidden') || state.notesJobId) return;
   const text = (e.clipboardData && e.clipboardData.getData('text')) || '';
   if (isHttpUrl(text)) { e.preventDefault(); startAdd(text); }
 });
@@ -697,11 +1003,12 @@ document.addEventListener('paste', (e) => {
 /* ---------- Keyboard ---------- */
 document.addEventListener('keydown', (e) => {
   const typing = e.target.closest && e.target.closest('input, textarea');
-  if (e.key === '/' && !typing && els.blockModal.classList.contains('hidden')) {
+  if (e.key === '/' && !typing && els.blockModal.classList.contains('hidden') && !state.notesJobId) {
     e.preventDefault();
     els.jobUrl.focus();
   } else if (e.key === 'Escape') {
-    if (!els.blockModal.classList.contains('hidden')) closeBlockModal();
+    if (state.notesJobId) closeNotes();
+    else if (!els.blockModal.classList.contains('hidden')) closeBlockModal();
     else if (!els.userModal.classList.contains('hidden') && state.user) els.userModal.classList.add('hidden');
     else if (!els.addPanel.classList.contains('hidden')) closePanel();
   }

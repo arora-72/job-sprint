@@ -272,7 +272,7 @@ textarea { resize: vertical; }
 .preview-actions .btn { height: 41px; }
 
 /* ---------- Stat tiles ---------- */
-.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 20px; }
+.stats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; margin-bottom: 20px; }
 .stat {
   position: relative; text-align: left; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
   padding: 16px 18px; display: flex; flex-direction: column; gap: 2px; box-shadow: var(--shadow-sm);
@@ -313,6 +313,7 @@ textarea { resize: vertical; }
   color: var(--text-2); background: var(--surface-2); border-bottom: 1px solid var(--border);
 }
 .group-head.backlog { color: var(--amber); background: var(--amber-row); }
+.group-head.ready { color: var(--success); background: var(--success-bg); }
 .group-hint { text-transform: none; letter-spacing: 0; font-weight: 500; font-size: 12px; color: var(--text-3); }
 
 .job-row {
@@ -344,6 +345,8 @@ textarea { resize: vertical; }
 .status-chip { display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 9px; font-size: 11px; font-weight: 700; }
 .status-chip.applied { color: var(--success); background: var(--success-bg); }
 .status-chip.blocked { color: var(--amber); background: var(--amber-bg); }
+.status-chip.stale { color: var(--text-2); background: var(--surface-2); border: 1px dashed var(--border-strong); }
+.status-chip.neutral { color: var(--text-2); background: var(--surface-2); }
 .actions { grid-area: actions; display: flex; justify-content: flex-end; gap: 6px; }
 
 /* Discover keeps the match rationale beside a prominent, readable rating. */
@@ -425,6 +428,7 @@ textarea { resize: vertical; }
 }
 @media (max-width: 900px) {
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stat.networking { grid-column: 1 / -1; }
 }
 @media (max-width: 720px) {
   .topbar { grid-template-columns: 1fr auto; gap: 10px; padding: 10px 16px; }
@@ -450,6 +454,16 @@ textarea { resize: vertical; }
   .job-title, .job-sub { white-space: normal; }
   .actions { justify-content: stretch; }
   .actions .btn { flex: 1; padding: 9px 8px; }
+  .actions .notes-btn { flex: none; padding: 9px 12px; }
+  .tabs { overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tabs.can-scroll-right { -webkit-mask-image: linear-gradient(to right, #000 82%, transparent); mask-image: linear-gradient(to right, #000 82%, transparent); }
+  .tabs.can-scroll-left { -webkit-mask-image: linear-gradient(to left, #000 82%, transparent); mask-image: linear-gradient(to left, #000 82%, transparent); }
+  .tabs.can-scroll-left.can-scroll-right { -webkit-mask-image: linear-gradient(to right, transparent, #000 14%, #000 86%, transparent); mask-image: linear-gradient(to right, transparent, #000 14%, #000 86%, transparent); }
+  .tab { flex: none; margin-right: 16px; }
+  .group-head .group-hint { text-align: right; }
+  .job-row.networking .job-meta { padding-left: 64px; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+  .note-preview { max-width: 100%; }
   .discover-row { padding: 16px; }
   .discover-foot { flex-direction: column; align-items: stretch; }
   .discover-foot .actions { justify-content: stretch; }
@@ -464,4 +478,90 @@ textarea { resize: vertical; }
   .tier-mark { width: 46px; height: 62px; }
   .tier-mark strong { font-size: 26px; }
   .tier-mark span { font-size: 9px; }
+}
+
+/* ---------- Networking ---------- */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.meta-small { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-3); }
+.job-row.networking .job-meta.stack { gap: 6px; }
+.job-row.networking .age { min-width: 52px; }
+.job-row.networking.is-ready { background: color-mix(in srgb, var(--success-bg) 35%, transparent); }
+
+/* Status dropdown styled as a colored pill; still a native select for keyboard and phone pickers. */
+.net-select-wrap { position: relative; display: inline-flex; align-items: center; border-radius: 999px; border: 1px solid var(--border-strong); background: var(--surface-2); color: var(--text); }
+.net-select-wrap::after { content: ""; position: absolute; right: 11px; top: 50%; width: 6px; height: 6px; margin-top: -5px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(45deg); pointer-events: none; opacity: .7; }
+.net-select { appearance: none; -webkit-appearance: none; border: 0; background: transparent; color: inherit; font-size: 12.5px; font-weight: 600; padding: 5px 28px 5px 12px; border-radius: 999px; cursor: pointer; outline: none; }
+.net-select:focus-visible { box-shadow: 0 0 0 3px var(--ring); }
+.net-select option { color: var(--text); background: var(--surface); }
+.net-select-wrap.s-first_pass, .net-select-wrap.s-second_pass { background: var(--accent-soft); color: var(--accent-text); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+.net-select-wrap.s-second_pass { border-color: var(--accent); }
+.net-select-wrap.s-successful { background: var(--success-bg); color: var(--success); border-color: color-mix(in srgb, var(--success) 40%, transparent); }
+.net-select-wrap.s-stale { background: var(--surface-2); color: var(--text-3); border-style: dashed; }
+
+/* ---------- Notes on rows ---------- */
+.notes-btn { gap: 5px; padding-left: 9px; padding-right: 9px; color: var(--text-3); }
+.notes-btn svg { width: 15px; height: 15px; }
+.notes-btn.has-notes { color: var(--accent-text); border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
+.note-preview {
+  display: flex; gap: 8px; align-items: baseline; max-width: min(520px, 100%); margin-top: 6px; padding: 3px 8px;
+  border: 0; border-left: 2px solid var(--accent); border-radius: 0 6px 6px 0; background: var(--surface-2);
+  color: var(--text-2); font-size: 12.5px; text-align: left; cursor: pointer;
+}
+.note-preview:hover { color: var(--text); }
+.note-preview-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.note-preview-meta { flex: none; font-size: 11px; color: var(--text-3); }
+
+/* ---------- History filters ---------- */
+.subfilters { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--surface-2); }
+.subfilter { border: 1px solid var(--border); background: var(--surface); color: var(--text-2); border-radius: 999px; padding: 4px 11px; font-size: 12.5px; font-weight: 600; transition: border-color .15s, color .15s, background .15s; }
+.subfilter span { margin-left: 3px; color: var(--text-3); font-weight: 500; }
+.subfilter:hover { border-color: var(--border-strong); color: var(--text); }
+.subfilter.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-text); }
+.subfilter.active span { color: inherit; }
+.subfilter:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---------- Notes drawer ---------- */
+.drawer-backdrop { position: fixed; inset: 0; z-index: 110; background: var(--backdrop); animation: fadein .15s ease-out; }
+.drawer {
+  position: fixed; z-index: 120; top: 0; right: 0; bottom: 0; width: min(440px, 100vw);
+  display: flex; flex-direction: column; background: var(--surface); border-left: 1px solid var(--border);
+  box-shadow: var(--shadow-lg); animation: slidein .2s ease-out;
+}
+@keyframes slidein { from { transform: translateX(24px); opacity: 0; } }
+.drawer-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; padding: 20px 20px 14px; border-bottom: 1px solid var(--border); }
+.drawer-head-text { min-width: 0; }
+.drawer-head h2 { margin: 4px 0 2px; font-family: "Source Serif 4", Georgia, serif; font-weight: 600; font-size: 20px; line-height: 1.3; }
+.drawer-sub { margin: 0; font-size: 13px; color: var(--text-3); }
+.note-form { padding: 14px 20px; border-bottom: 1px solid var(--border); }
+.note-form textarea { font-size: 14px; line-height: 1.5; min-height: 76px; }
+.note-form-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 8px; }
+.note-form-foot .btn { margin-left: auto; }
+.note-hint { font-size: 11.5px; color: var(--text-3); }
+.notes-list { flex: 1; overflow-y: auto; padding: 6px 20px 24px; }
+.notes-empty { margin-top: 18px; padding: 22px; border: 1px dashed var(--border-strong); border-radius: 12px; text-align: center; color: var(--text-3); font-size: 13px; line-height: 1.5; }
+.note { padding: 14px 0; border-bottom: 1px solid var(--border); animation: fadein .2s ease-out; }
+.note:last-child { border-bottom: 0; }
+.note.pending { opacity: .6; }
+.note-head { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.note-head strong { font-weight: 600; }
+.note-when { color: var(--text-3); font-size: 12px; }
+.note-delete { margin-left: auto; border: 0; background: transparent; color: var(--text-3); font-size: 12px; padding: 2px 6px; border-radius: 6px; opacity: 0; transition: opacity .15s, color .15s, background .15s; }
+.note:hover .note-delete, .note-delete:focus-visible, .note-delete.confirming { opacity: 1; }
+.note-delete:hover, .note-delete.confirming { color: var(--danger); background: var(--danger-bg); }
+.note-text { margin: 8px 0 0 30px; font-size: 14px; line-height: 1.55; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.note-text a { color: var(--accent-text); }
+
+@media (hover: none) { .note-delete { opacity: 1; } }
+@media (max-width: 720px) {
+  .drawer { top: auto; width: 100%; max-height: 88vh; border-left: 0; border-top: 1px solid var(--border); border-radius: 18px 18px 0 0; animation: sheetup .22s ease-out; }
+  @keyframes sheetup { from { transform: translateY(30px); opacity: 0; } }
+  .drawer-head, .note-form { padding-left: 16px; padding-right: 16px; }
+  .notes-list { padding: 4px 16px 24px; }
+  .note-hint { display: none; }
+  .subfilters { padding: 10px 16px; }
+}
+
+@media (max-width: 420px) {
+  .tab { margin-right: 12px; font-size: 14px; }
+  .tab .count-badge { min-width: 18px; padding: 0 5px; margin-left: 2px; }
 }

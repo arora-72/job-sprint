@@ -13,7 +13,7 @@ This site is public and has no login. The name chooser records who an action is
 attributed to; it does not verify that person's identity. Anyone with the URL
 can view and change the shared jobs.
 
-## What V2 does
+## What the app does
 
 - Asks **Garima or Indresh?** on first use and remembers the choice in that browser.
 - Pasting a job URL starts parsing immediately. The server suggests company, role, and location without an AI API; all suggestions are editable before saving.
@@ -21,7 +21,9 @@ can view and change the shared jobs.
 - Shows counts and filters for open jobs, applications today, open jobs added today, and older open jobs.
 - Groups open jobs into Backlog and Added today. Pipeline and Discover refresh on first load, after successful actions, when manually refreshed, and at most once every 10 minutes while visible. Returning to the tab only refreshes when the last attempt is at least 10 minutes old. The header shows the last successful refresh time.
 - **Open**, **Applied**, and **Block** actions; the last two show a six-second Undo. Blocking supports a custom or one-click reason.
-- Applied and blocked jobs appear in **History**, with attribution and timestamps. **Move back** returns a job to the open pipeline.
+- **Applied** moves a job to **Networking**, where it carries a status (Not networked, 1st pass done, 2nd pass done, Successful, Stale). **Done → History** closes it with that status as the outcome.
+- Blocked jobs and closed networking jobs appear in **History**, with attribution, timestamps, and outcome filters. **Move back** returns a closed job to Networking and a blocked job to To apply.
+- Every job has a running **notes** log (who and when for each note).
 - Uses a warm cream and clay theme, with a header button for dark mode. It follows the device setting until a choice is made, then remembers that choice in the browser.
 - No PDF upload or analytics graphs yet.
 
@@ -41,7 +43,7 @@ can view and change the shared jobs.
 ### 1. Create a free Supabase project
 
 Open Supabase, create a project, then open **SQL Editor** and run the contents of `supabase/schema.sql`.
-For Discover, also run `supabase/discover.sql` in the same project. The existing production project already has both tables.
+For Discover, also run `supabase/discover.sql` in the same project. For the Networking stage and notes, run `supabase/networking.sql`. All three are safe to re-run.
 
 From **Project Settings → API**, copy:
 - Project URL → `SUPABASE_URL`

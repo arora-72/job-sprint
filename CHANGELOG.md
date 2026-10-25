@@ -4,7 +4,25 @@ Changes to Job Sprint are recorded here. The initial Git snapshot is `v1.0.0`. E
 
 ## Unreleased
 
-Add future changes here before publishing the next version.
+### Networking stage
+
+- Marking a job **Applied** now moves it to a new **Networking** tab instead of History. Each job there has a status: Not networked, 1st pass done, 2nd pass done, Successful, or Stale. Changing it is one click from a dropdown, with a six-second Undo.
+- **Done → History** closes a networking job and keeps its last status as the outcome. Jobs marked Successful or Stale are grouped under *Ready to close* with Done highlighted.
+- Networking is grouped by status, longest-waiting first. A days-since badge turns amber after five days without a networking update.
+- Added a fifth dashboard tile, **Networking**, with counts of jobs not started, needing a nudge, and ready to close.
+- **History** shows each job's outcome (Successful, Stale, Blocked, or the status it was closed at) with filters. **Move back** returns closed jobs to Networking and blocked jobs to To apply.
+- Jobs already marked Applied before this change start in Networking as Not networked.
+
+### Notes
+
+- Every job in To apply, Networking, and History has a running notes log. Each note records who wrote it and when. The latest note previews on the row, and links in notes are clickable.
+- Notes open in a side panel (a bottom sheet on phones). Enter saves, Shift+Enter adds a line, and deleting takes two clicks.
+
+### Other
+
+- Tabs are now ordered To apply, Networking, History, Discover. On phones they scroll sideways with a fade at the edge.
+- Duplicate-link warnings say which tab the existing job is in.
+- Database: `supabase/networking.sql` adds networking and notes columns to `public.jobs` (additive, with a backup copy first). No new tables.
 
 ## 1.0.0 — 2026-10-24
 
