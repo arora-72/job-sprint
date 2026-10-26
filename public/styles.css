@@ -256,6 +256,11 @@ textarea { resize: vertical; }
 .icon-btn.spinning svg, .icon-btn.spinning > span { animation: spin .8s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* Bell toggle: slash appears when muted */
+.sound-toggle .i-slash { display: none; }
+.sound-toggle[aria-pressed="false"] .i-slash { display: block; }
+.sound-toggle[aria-pressed="false"] { color: var(--text-3); }
+
 /* Theme toggle shows the icon for the theme you'd switch to */
 .theme-toggle .i-sun { display: none; }
 :root[data-theme="dark"] .theme-toggle .i-sun { display: block; }

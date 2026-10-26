@@ -46,7 +46,7 @@ let refreshTimer = null;
 const els = {};
 [
   'linkedinCopy', 'linkedinLabel', 'linkedinEdit', 'linkedinForm', 'linkedinInput', 'linkedinWho', 'linkedinErr', 'linkedinCancel',
-  'userModal', 'switchUser', 'activeUser', 'activeUserAvatar', 'themeToggle', 'addForm', 'jobUrl', 'parseBtn',
+  'userModal', 'switchUser', 'activeUser', 'activeUserAvatar', 'soundToggle', 'themeToggle', 'addForm', 'jobUrl', 'parseBtn',
   'addPanel', 'addPanelUrl', 'parseConfidence', 'parseStatus', 'dupWarning', 'previewForm',
   'titleInput', 'companyInput', 'locationInput', 'cancelPreview', 'saveJob',
   'statOpenValue', 'statOpenSub', 'statAppliedValue', 'statAppliedSub', 'statTodayValue', 'statTodaySub',
@@ -1164,6 +1164,50 @@ function reopenJob(id) {
   return mutate(id, { network_closed_by: null, network_closed_at: null, updated_at: new Date().toISOString() }, { action: 'reopen' });
 }
 
+// Bell: a soft two-strike chime synthesized with Web Audio (no audio file). On by default,
+// muted with the bell button in the header (remembered per browser). Plays only from a click.
+let audioCtx = null;
+function soundOn() { return store.get('jobSprintSound') !== 'off'; }
+function syncSound() {
+  const on = soundOn();
+  const label = on ? 'Mute bell sound' : 'Turn bell sound on';
+  els.soundToggle.setAttribute('aria-pressed', String(on));
+  els.soundToggle.setAttribute('aria-label', label);
+  els.soundToggle.setAttribute('title', label);
+}
+function playBell(big) {
+  if (!soundOn()) return;
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    audioCtx = audioCtx || new AC();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const strike = (when, freq, level) => {
+      // Bell partials are not whole multiples of the base note, which is what makes it sound like metal.
+      [[1, 1, 2.4], [2.01, 0.45, 1.6], [2.76, 0.28, 1.1], [5.4, 0.12, 0.6]].forEach(([ratio, amp, decay]) => {
+        const osc = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = freq * ratio;
+        g.gain.setValueAtTime(0.0001, when);
+        g.gain.exponentialRampToValueAtTime(level * amp, when + 0.006);
+        g.gain.exponentialRampToValueAtTime(0.0001, when + decay);
+        osc.connect(g); g.connect(audioCtx.destination);
+        osc.start(when); osc.stop(when + decay + 0.05);
+      });
+    };
+    const t = audioCtx.currentTime + 0.02;
+    strike(t, 880, 0.22);
+    if (big) strike(t + 0.16, 1318.5, 0.2); // milestone: a second, higher strike
+  } catch { /* sound is a nicety; never block applying */ }
+}
+els.soundToggle.addEventListener('click', () => {
+  store.set('jobSprintSound', soundOn() ? 'off' : 'on');
+  syncSound();
+  playBell(false); // audible confirmation when turning on; silent when muting
+});
+syncSound();
+
 // Celebration: a short confetti burst from the Applied button. Skipped for reduced-motion users.
 const CHEER = { 1: 'First one of the day. Nice start.', 3: 'Three today. You’re rolling.', 5: 'Five applications today. Huge.', 10: 'Ten today! Take a bow.' };
 function celebrate(originEl, big) {
@@ -1236,6 +1280,7 @@ els.jobList.addEventListener('click', (e) => {
   if (action === 'apply') {
     setStatus(id, 'applied');
     const today = buckets().appliedToday.length;
+    playBell(today in CHEER);
     celebrate(btn, today in CHEER);
     showToast(CHEER[today] ? `${CHEER[today]} Moved to Networking: ${jobLabel(job)}` : `Applied · moved to Networking: ${jobLabel(job)}`, { undo: () => setStatus(id, 'pipeline') });
   } else if (action === 'block') {

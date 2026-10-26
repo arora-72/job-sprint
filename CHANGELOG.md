@@ -4,6 +4,13 @@ Changes to Job Sprint are recorded here. The initial Git snapshot is `v1.0.0`. E
 
 ## Unreleased
 
+### Bell on Applied
+
+- Clicking **Applied** on a role rings a soft bell. The first application of the day, and the 3rd, 5th and 10th, ring a double strike to match the confetti milestones.
+- The bell is synthesized in the browser (no audio file). It plays only from your click, and Undo is silent.
+- A bell button in the header mutes or unmutes it; the choice is remembered per browser. Turning it on plays a quick test ping.
+- Front-end only. No database change.
+
 ### Dark mode: Ink
 
 - Dark mode moves from warm brown-grey to a deep navy-black ("Ink"), with clearer depth: darker page, lighter cards, and a faint top-edge highlight in place of heavy shadows.
