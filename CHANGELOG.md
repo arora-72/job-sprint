@@ -4,6 +4,13 @@ Changes to Job Sprint are recorded here. The initial Git snapshot is `v1.0.0`. E
 
 ## Unreleased
 
+### Dark mode: Ink
+
+- Dark mode moves from warm brown-grey to a deep navy-black ("Ink"), with clearer depth: darker page, lighter cards, and a faint top-edge highlight in place of heavy shadows.
+- Per-row **Applied** and other row-level primary buttons become a soft clay outline in dark mode and fill solid on hover, so the main **Add** button is the one loud action.
+- The Backlog card is a normal card with an amber edge and amber number, no brown fill. Block and Open are outline-only.
+- Light mode is unchanged. No database change.
+
 ### Company at a glance
 
 - Each job row has its own **company column** right before "Added", with a colored tile (initials) and the bold company name. The same company always gets the same tile color on every row and tab. Roles can use two lines.
