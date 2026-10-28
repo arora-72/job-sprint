@@ -120,6 +120,10 @@
     </form>
 
     <div class="top-right">
+      <button id="todoBtn" class="todo-btn" type="button" aria-haspopup="dialog" aria-expanded="false" title="Your to-do list">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="4"/><path d="M8 12.2l2.6 2.6L16 9.4"/></svg>
+        <span class="todo-label">To-do</span><span id="todoCount" class="todo-count hidden">0</span>
+      </button>
       <div class="li-wrap">
         <div class="li-chip">
           <button id="linkedinCopy" class="li-copy" type="button" title="Copy your LinkedIn link">
@@ -233,6 +237,30 @@
   </main>
 
   <!-- Notes for one job: a running log, newest first -->
+  <div id="todoBackdrop" class="drawer-backdrop hidden"></div>
+  <aside id="todoDrawer" class="drawer todo-drawer hidden" role="dialog" aria-modal="true" aria-labelledby="todoTitle">
+    <div class="drawer-head">
+      <div class="drawer-head-text">
+        <span class="eyebrow-sm">To-do</span>
+        <h2 id="todoTitle">Your plate</h2>
+        <p id="todoSub" class="drawer-sub"></p>
+      </div>
+      <button class="icon-btn" id="closeTodo" aria-label="Close to-do list">×</button>
+    </div>
+    <div id="todoSwitch" class="tswitch" role="group" aria-label="Whose list"></div>
+    <form id="todoForm" class="tadd" novalidate autocomplete="off">
+      <span class="plus" aria-hidden="true">+</span>
+      <span id="todoDraft" class="tdraft hidden"></span>
+      <input id="todoInput" type="text" maxlength="500" placeholder="Add a to-do" aria-label="New to-do" enterkeyhint="done" />
+      <kbd class="tkbd">Enter</kbd>
+    </form>
+    <div id="todoScroll" class="tscroll">
+      <ul id="todoOpenList" class="tlist" aria-label="Open to-dos"></ul>
+      <div id="todoDoneWrap"></div>
+      <p class="tfoot-hint">Drag <span aria-hidden="true">⠿</span> to reorder · Click text to edit · Right-click for more</p>
+    </div>
+  </aside>
+
   <div id="notesBackdrop" class="drawer-backdrop hidden"></div>
   <aside id="notesDrawer" class="drawer hidden" role="dialog" aria-modal="true" aria-labelledby="notesTitle">
     <div class="drawer-head">

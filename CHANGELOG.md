@@ -4,6 +4,19 @@ Changes to Job Sprint are recorded here. The initial Git snapshot is `v1.0.0`. E
 
 ## Unreleased
 
+### To-do lists
+
+- New **To-do** button in the header opens a side panel (a bottom sheet on phones). Garima and Indresh each have their own list, with a switch at the top. It opens on yours.
+- The count on the button is your open items. It turns clay when something on your list is due today or overdue.
+- Type and press Enter to add. New items go to the top. Click the text to edit it.
+- Tick an item: it strikes through, plays a soft tick (same mute button as the bell), then slides into **Done** with Undo. Done items show for 7 days, then drop off the list (they stay in the database). Untick to send an item back to the bottom of the list.
+- Drag the ⠿ handle to reorder, with a mouse or a finger. Keyboard: focus the handle and use the arrow keys.
+- The ⋯ menu (or right-click) sets a due date (Today, Tomorrow, or any date), moves the item to the other person's list, unlinks it, or deletes it with Undo.
+- You can add to the other person's list. Those items show "from Garima" or "from Indresh".
+- **Add to-do…** in a job's or company's ⋯ menu opens the panel with that company linked. The company chip on the item opens that job's or company's notes.
+- On tablets the header buttons show icons only, and on phones the user pill shows just the circle, to make room.
+- Database: new `todos` table (`supabase/todos.sql`). Existing tables are not touched.
+
 ### Bell on Applied
 
 - Clicking **Applied** on a role rings a soft bell. The first application of the day, and the 3rd, 5th and 10th, ring a double strike to match the confetti milestones.

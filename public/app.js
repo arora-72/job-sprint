@@ -40,13 +40,24 @@ const state = {
   needsActionRefresh: false,
   loadedOnce: false,
   inflight: new Map(),  // job id -> promise chain, keeps updates for one job in order
+  todos: [],
+  todosLoaded: false,
+  todosLoading: false,
+  todoOpen: false,      // panel visible
+  todoView: null,       // whose list the panel shows: 'Garima' | 'Indresh'
+  todoDraftLink: null,  // { kind, id, label } when adding from a job or company menu
+  todoEditing: null,    // id of the item being edited
+  todoDrag: null,       // drag state while reordering
+  todoChecking: new Set(), // ids mid tick animation
+  todoDoneCollapsed: store.get('jobSprintTodoDone') === 'collapsed',
 };
 let refreshTimer = null;
 
 const els = {};
 [
   'linkedinCopy', 'linkedinLabel', 'linkedinEdit', 'linkedinForm', 'linkedinInput', 'linkedinWho', 'linkedinErr', 'linkedinCancel',
-  'userModal', 'switchUser', 'activeUser', 'activeUserAvatar', 'soundToggle', 'themeToggle', 'addForm', 'jobUrl', 'parseBtn',
+  'userModal', 'switchUser', 'activeUser', 'activeUserAvatar', 'soundToggle', 'todoBtn', 'todoCount', 'todoBackdrop', 'todoDrawer', 'todoTitle', 'todoSub', 'closeTodo',
+  'todoSwitch', 'todoForm', 'todoInput', 'todoDraft', 'todoScroll', 'todoOpenList', 'todoDoneWrap', 'themeToggle', 'addForm', 'jobUrl', 'parseBtn',
   'addPanel', 'addPanelUrl', 'parseConfidence', 'parseStatus', 'dupWarning', 'previewForm',
   'titleInput', 'companyInput', 'locationInput', 'cancelPreview', 'saveJob',
   'statOpenValue', 'statOpenSub', 'statAppliedValue', 'statAppliedSub', 'statTodayValue', 'statTodaySub',
@@ -128,6 +139,8 @@ function setUser(name) {
   els.activeUserAvatar.className = `avatar ${userClass(name)}`;
   els.userModal.classList.add('hidden');
   renderLinkedin();
+  if (!state.todoOpen) state.todoView = name;
+  renderTodos();
   if (!els.addPanel.classList.contains('hidden')) els.titleInput.focus();
 }
 function chooseUser() { els.userModal.classList.remove('hidden'); }
@@ -242,6 +255,23 @@ async function loadJobs({ silent = false } = {}) {
   }
 }
 
+async function loadTodos({ silent = false } = {}) {
+  if (state.todosLoading || state.inflight.size || state.todoDrag || state.todoEditing) return false; // keep in-progress edits
+  state.todosLoading = true;
+  try {
+    const data = await api('todos');
+    state.todos = data.todos || [];
+    return true;
+  } catch (err) {
+    if (!silent && state.todoOpen) showToast(err.message, { error: true });
+    return false;
+  } finally {
+    state.todosLoading = false;
+    state.todosLoaded = true;
+    render();
+  }
+}
+
 async function loadCompanies({ silent = false } = {}) {
   if (state.companiesLoading || state.inflight.size) return false; // don't clobber optimistic changes mid-flight
   state.companiesLoading = true;
@@ -289,7 +319,7 @@ async function refreshAll({ silent = false, afterAction = false } = {}) {
   els.refreshBtn.disabled = true;
   state.refreshPromise = (async () => {
     // Companies load alongside, but a companies failure never marks the whole refresh as failed.
-    const [jobsOk, discoverOk] = await Promise.all([loadJobs({ silent }), loadDiscover({ silent }), loadCompanies({ silent })]);
+    const [jobsOk, discoverOk] = await Promise.all([loadJobs({ silent }), loadDiscover({ silent }), loadCompanies({ silent }), loadTodos({ silent })]);
     state.refreshError = !(jobsOk && discoverOk);
     if (!state.refreshError) state.lastSync = new Date();
     return !state.refreshError;
@@ -979,6 +1009,7 @@ els.ownerBar.addEventListener('click', (e) => {
 });
 
 function render() {
+  renderTodos();
   const b = buckets();
   renderTiles(b);
 
@@ -1102,7 +1133,7 @@ function localPatch(status, reason) {
   return { status, applied_by: null, applied_at: null, blocked_by: null, blocked_at: null, blocked_reason: '', ...CLEARED_NETWORK, updated_at: now };
 }
 
-function listFor(coll) { return coll === 'companies' ? state.companies : coll === 'discover' ? state.discover : state.jobs; }
+function listFor(coll) { return coll === 'companies' ? state.companies : coll === 'discover' ? state.discover : coll === 'todos' ? state.todos : state.jobs; }
 const collOf = (kind) => (kind === 'company' ? 'companies' : kind === 'discover' ? 'discover' : 'jobs');
 
 // Apply a change locally right away, then save it. Saves for one job run in order; a failure rolls back.
@@ -1122,7 +1153,7 @@ function mutate(id, local, body, coll = 'jobs') {
   let saved = false;
   next.then((res) => {
     saved = true;
-    const savedRow = res && (res.job || res.company || res.role);
+    const savedRow = res && (res.job || res.company || res.role || res.todo);
     if (state.inflight.get(id) === next && savedRow) Object.assign(job, savedRow);
   })
     .catch((err) => {
@@ -1200,6 +1231,28 @@ function playBell(big) {
     strike(t, 880, 0.22);
     if (big) strike(t + 0.16, 1318.5, 0.2); // milestone: a second, higher strike
   } catch { /* sound is a nicety; never block applying */ }
+}
+// Soft, short tick for checking off a to-do. Same mute button as the bell.
+function playTick() {
+  if (!soundOn()) return;
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    audioCtx = audioCtx || new AC();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const t = audioCtx.currentTime + 0.01;
+    [[1568, 0.07, 0.22], [2349, 0.03, 0.12]].forEach(([freq, level, decay]) => {
+      const osc = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(level, t + 0.004);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + decay);
+      osc.connect(g); g.connect(audioCtx.destination);
+      osc.start(t); osc.stop(t + decay + 0.05);
+    });
+  } catch { /* sound is a nicety */ }
 }
 els.soundToggle.addEventListener('click', () => {
   store.set('jobSprintSound', soundOn() ? 'off' : 'on');
@@ -1424,7 +1477,7 @@ const MENU_ICON = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="tru
 function menuButton() {
   return `<button class="btn ghost small menu-btn" data-action="menu" aria-label="More actions" aria-haspopup="menu" title="More actions">${MENU_ICON}</button>`;
 }
-function entryOf(id, kind) { return (kind === 'company' ? state.companies : state.jobs).find((x) => x.id === id); }
+function entryOf(id, kind) { return (kind === 'company' ? state.companies : kind === 'todo' ? state.todos : state.jobs).find((x) => x.id === id); }
 
 // Opens next to a button, or at the pointer for a right-click.
 function openRowMenu(id, kind, anchor, point) {
@@ -1433,7 +1486,7 @@ function openRowMenu(id, kind, anchor, point) {
   const items = kind === 'company'
     ? '<button role="menuitem" class="menu-item" data-menu="open">Open people &amp; notes</button>'
     : '<button role="menuitem" class="menu-item" data-menu="copy">Copy job link</button>';
-  showRowMenu(id, kind, `${items}<button role="menuitem" class="menu-item danger" data-menu="delete">Delete…</button>`, anchor, point);
+  showRowMenu(id, kind, `${items}<button role="menuitem" class="menu-item" data-menu="todo">Add to-do…</button><button role="menuitem" class="menu-item danger" data-menu="delete">Delete…</button>`, anchor, point);
 }
 function openOwnerMenu(id, kind, anchor) {
   const entry = entryOf(id, kind);
@@ -1467,6 +1520,13 @@ els.rowMenu.addEventListener('click', async (e) => {
   const { id, kind } = els.rowMenu.dataset;
   const entry = entryOf(id, kind);
   if (!entry) { closeRowMenu(); return; }
+  if (kind === 'todo') { todoMenuAction(entry, item); return; }
+  if (item.dataset.menu === 'todo') {
+    closeRowMenu();
+    const label = kind === 'company' ? readableText(entry.name) : readableText(entry.company || entry.title || 'Job');
+    openTodos({ link: { kind: kind === 'company' ? 'company' : 'job', id, label } });
+    return;
+  }
   if (item.dataset.menu === 'assign') { closeRowMenu(); assignOwner(id, kind, item.dataset.owner || null); return; }
   if (item.dataset.menu === 'open') { closeRowMenu(); openNotes(id, 'company'); return; }
   if (item.dataset.menu === 'copy') {
@@ -1488,7 +1548,7 @@ els.rowMenu.addEventListener('keydown', (e) => {
   items[(i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length].focus();
 });
 document.addEventListener('mousedown', (e) => {
-  if (!els.rowMenu.classList.contains('hidden') && !e.target.closest('#rowMenu, .menu-btn, .own')) closeRowMenu();
+  if (!els.rowMenu.classList.contains('hidden') && !e.target.closest('#rowMenu, .menu-btn, .own, .tmenu')) closeRowMenu();
 });
 window.addEventListener('resize', closeRowMenu);
 window.addEventListener('scroll', closeRowMenu, true);
@@ -1715,19 +1775,470 @@ els.jobUrl.addEventListener('paste', (e) => {
 // Pasting a link anywhere on the page does the same.
 document.addEventListener('paste', (e) => {
   if (e.target.closest && e.target.closest('input, textarea, [contenteditable]')) return;
-  if (!els.userModal.classList.contains('hidden') || !els.blockModal.classList.contains('hidden') || !els.companyModal.classList.contains('hidden') || state.notesJobId) return;
+  if (!els.userModal.classList.contains('hidden') || !els.blockModal.classList.contains('hidden') || !els.companyModal.classList.contains('hidden') || state.notesJobId || state.todoOpen) return;
   const text = (e.clipboardData && e.clipboardData.getData('text')) || '';
   if (isHttpUrl(text)) { e.preventDefault(); startAdd(text); }
+});
+
+/* ---------- To-do (one list each for Garima and Indresh) ---------- */
+const TODO_DONE_DAYS = 7;
+const TODO_ICONS = {
+  grip: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>',
+  tick: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+  cal: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="3"/><path d="M8 3v4M16 3v4M3.5 10h17"/></svg>',
+};
+const otherUser = (name) => (name === 'Garima' ? 'Indresh' : 'Garima');
+function newId() {
+  if (crypto.randomUUID) return crypto.randomUUID();
+  const b = crypto.getRandomValues(new Uint8Array(16));
+  b[6] = (b[6] & 15) | 64; b[8] = (b[8] & 63) | 128;
+  const h = [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+function dayKey(d) { const x = new Date(d); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`; }
+function recentDone(t) { return t.done && (!t.done_at || Date.now() - Date.parse(t.done_at) < TODO_DONE_DAYS * DAY); }
+function todoLists(owner) {
+  const mine = state.todos.filter((t) => t.owner === owner);
+  return {
+    open: mine.filter((t) => !t.done).sort((a, b) => a.position - b.position || String(a.added_at).localeCompare(String(b.added_at))),
+    done: mine.filter(recentDone).sort((a, b) => String(b.done_at).localeCompare(String(a.done_at))),
+  };
+}
+function dueInfo(due) {
+  if (!due) return null;
+  const [y, m, d] = due.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  const diff = Math.round((date - startOfToday()) / DAY);
+  const short = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date);
+  const weekday = new Intl.DateTimeFormat(undefined, { weekday: 'short' }).format(date);
+  if (diff < 0) return { label: diff === -1 ? 'Yesterday' : short, cls: 'late', title: `Overdue: was due ${short}` };
+  if (diff === 0) return { label: 'Today', cls: 'today', title: 'Due today' };
+  if (diff === 1) return { label: 'Tomorrow', cls: '', title: `Due ${short}` };
+  if (diff < 7) return { label: weekday, cls: '', title: `Due ${weekday} ${short}` };
+  return { label: short, cls: '', title: `Due ${short}` };
+}
+function linkTarget(t) {
+  if (!t.link_kind || !t.link_id) return null;
+  return entryOf(t.link_id, t.link_kind === 'company' ? 'company' : 'job') || null;
+}
+function todoItemHtml(t) {
+  const checking = state.todoChecking.has(t.id);
+  const done = t.done || checking;
+  const meta = [];
+  if (t.link_kind && t.link_label) {
+    const live = linkTarget(t);
+    const inner = `${coTile(t.link_label, true)}${escapeHtml(t.link_label)}`;
+    meta.push(live
+      ? `<button type="button" class="tchip" data-todo-link title="Open ${escapeHtml(t.link_label)}">${inner}</button>`
+      : `<span class="tchip gone" title="This ${t.link_kind} was removed">${inner}</span>`);
+  }
+  const due = !t.done && dueInfo(t.due_on);
+  if (due) meta.push(`<span class="tdue ${due.cls}" title="${escapeHtml(due.title)}">${TODO_ICONS.cal}${escapeHtml(due.label)}</span>`);
+  if (t.added_by && t.added_by !== t.owner) meta.push(`<span class="tfrom"><span class="mini-avatar ${userClass(t.added_by)}">${escapeHtml(t.added_by[0])}</span>from ${escapeHtml(t.added_by)}</span>`);
+  if (t.done && t.done_at) {
+    const when = new Intl.DateTimeFormat(undefined, { weekday: 'short' }).format(new Date(t.done_at));
+    meta.push(`<span class="tby">Done ${daysOld(t.done_at) === 0 ? 'today' : escapeHtml(when)}${t.done_by && t.done_by !== t.owner ? ` by ${escapeHtml(t.done_by)}` : ''}</span>`);
+  }
+  const label = escapeHtml(readableText(t.text));
+  return `<li class="todo${t.done ? ' done' : ''}${checking ? ' checking' : ''}${t.pending ? ' pending' : ''}" data-todo-id="${escapeHtml(t.id)}">
+    ${t.done ? '<span class="grip-space"></span>' : `<button type="button" class="grip" data-todo-grip aria-label="Reorder ${label}. Use arrow keys to move." title="Drag to reorder">${TODO_ICONS.grip}</button>`}
+    <button type="button" class="tbox" role="checkbox" aria-checked="${done}" data-todo-check aria-label="${done ? 'Mark not done' : 'Mark done'}: ${label}">${TODO_ICONS.tick}</button>
+    <div class="tbody"><div class="ttext"${t.done ? '' : ' data-todo-text title="Click to edit"'}>${linkify(readableText(t.text))}</div>${meta.length ? `<div class="tmeta">${meta.join('')}</div>` : ''}</div>
+    <button type="button" class="tmenu" data-todo-menu aria-label="More actions for ${label}" aria-haspopup="menu" title="More">${MENU_ICON}</button>
+  </li>`;
+}
+function renderTodoBadge() {
+  const mine = state.user ? state.todos.filter((t) => t.owner === state.user && !t.done) : [];
+  els.todoCount.textContent = mine.length;
+  els.todoCount.classList.toggle('hidden', !mine.length);
+  const urgent = mine.some((t) => { const d = dueInfo(t.due_on); return d && (d.cls === 'late' || d.cls === 'today'); });
+  els.todoCount.classList.toggle('urgent', urgent);
+  els.todoBtn.title = mine.length ? `Your to-do list: ${plural(mine.length, 'open item')}${urgent ? ', something due' : ''}` : 'Your to-do list';
+  els.todoBtn.classList.toggle('open', state.todoOpen);
+  els.todoBtn.setAttribute('aria-expanded', String(state.todoOpen));
+}
+function renderTodos() {
+  renderTodoBadge();
+  if (!state.todoOpen) return;
+  const view = state.todoView || state.user || 'Garima';
+  const lists = todoLists(view);
+  const yours = view === state.user;
+  els.todoTitle.textContent = yours ? 'Your plate' : `${view}’s plate`;
+  els.todoSub.textContent = `${plural(lists.open.length, 'open item')} · ${lists.done.length} done this week`;
+  els.todoInput.placeholder = yours ? 'Add a to-do' : `Add to ${view}’s list`;
+  els.todoSwitch.innerHTML = USERS.map((u) => {
+    const n = state.todos.filter((t) => t.owner === u && !t.done).length;
+    return `<button type="button" class="${u === view ? 'on' : ''}" data-todo-view="${u}" aria-pressed="${u === view}"><span class="mini ${userClass(u)}">${u[0]}</span>${u}<span class="n">${n}</span></button>`;
+  }).join('');
+  const d = state.todoDraftLink;
+  els.todoDraft.classList.toggle('hidden', !d);
+  els.todoDraft.innerHTML = d ? `<span class="tchip">${coTile(d.label, true)}${escapeHtml(d.label)}<button type="button" class="tdraft-x" data-todo-draft-clear aria-label="Don’t link ${escapeHtml(d.label)}">×</button></span>` : '';
+  if (state.todoDrag || state.todoEditing) return; // don't rebuild the list under the pointer or the edit box
+
+  if (!state.todosLoaded) { els.todoOpenList.innerHTML = '<li class="tempty">Loading…</li>'; els.todoDoneWrap.innerHTML = ''; return; }
+  // Rebuilding the list would drop keyboard focus, so remember which control had it.
+  const active = document.activeElement;
+  const focusId = active && els.todoScroll.contains(active) ? active.closest('.todo')?.dataset.todoId : null;
+  const focusPart = focusId ? ['data-todo-grip', 'data-todo-check', 'data-todo-menu', 'data-todo-link'].find((a) => active.hasAttribute(a)) : null;
+  els.todoOpenList.innerHTML = lists.open.length
+    ? lists.open.map(todoItemHtml).join('')
+    : `<li class="tempty">${lists.done.length ? 'All clear. Nice work.' : yours ? 'Nothing on your plate yet. Add the next thing you’ll do.' : `${view}’s list is empty. Anything you add here goes to ${view}.`}</li>`;
+  els.todoDoneWrap.innerHTML = lists.done.length ? `
+    <button type="button" class="tdone-head" data-todo-done-toggle aria-expanded="${!state.todoDoneCollapsed}"><span class="chev${state.todoDoneCollapsed ? ' shut' : ''}" aria-hidden="true">▾</span>Done · ${lists.done.length}<span class="clear">Clears after ${TODO_DONE_DAYS} days</span></button>
+    ${state.todoDoneCollapsed ? '' : `<ul class="tlist" aria-label="Done">${lists.done.map(todoItemHtml).join('')}</ul>`}` : '';
+  if (focusId && focusPart) els.todoScroll.querySelector(`.todo[data-todo-id="${CSS.escape(focusId)}"] [${focusPart}]`)?.focus({ preventScroll: true });
+}
+
+function openTodos({ link = null } = {}) {
+  if (!state.user) { chooseUser(); return; }
+  if (state.notesJobId) closeNotes();
+  if (link || !state.todoOpen) state.todoView = state.user;
+  state.todoDraftLink = link;
+  state.todoOpen = true;
+  els.todoBackdrop.classList.remove('hidden');
+  els.todoDrawer.classList.remove('hidden');
+  render();
+  // On touch screens, don't pop the keyboard just for looking at the list.
+  if (link || window.matchMedia('(hover: hover)').matches) setTimeout(() => els.todoInput.focus(), 30);
+  if (!state.todosLoaded) loadTodos();
+}
+function closeTodos() {
+  if (state.todoEditing) finishTodoEdit(true);
+  state.todoOpen = false;
+  state.todoDraftLink = null;
+  els.todoBackdrop.classList.add('hidden');
+  els.todoDrawer.classList.add('hidden');
+  closeRowMenu();
+  renderTodoBadge();
+  els.todoBtn.focus({ preventScroll: true });
+}
+
+function addTodo() {
+  if (!state.user) { chooseUser(); return; }
+  const text = els.todoInput.value.replace(/\s+/g, ' ').trim();
+  if (!text) { els.todoInput.focus(); return; }
+  if (text.length > 500) { showToast('To-dos can be up to 500 characters.', { error: true }); return; }
+  const owner = state.todoView || state.user;
+  const open = todoLists(owner).open;
+  const position = open.length ? open[0].position - 1 : 0;
+  const link = state.todoDraftLink;
+  const now = new Date().toISOString();
+  const item = {
+    id: newId(), owner, text, done: false, done_at: null, done_by: null, position, due_on: null,
+    link_kind: link ? link.kind : null, link_id: link ? link.id : null, link_label: link ? link.label : null,
+    added_by: state.user, added_at: now, updated_at: now, pending: true,
+  };
+  state.todos.push(item);
+  els.todoInput.value = '';
+  state.todoDraftLink = null;
+  render();
+  const run = api('todos', { method: 'POST', body: JSON.stringify({ ...item, pending: undefined }) });
+  state.inflight.set(item.id, run);
+  run.then((res) => { Object.assign(item, res.todo || {}, { pending: false }); })
+    .catch((err) => {
+      state.todos = state.todos.filter((t) => t !== item);
+      if (!els.todoInput.value) els.todoInput.value = text;
+      showToast(`Couldn't add: ${err.message}`, { error: true });
+    })
+    .finally(() => { if (state.inflight.get(item.id) === run) state.inflight.delete(item.id); render(); });
+}
+
+function toggleTodo(id) {
+  if (!state.user) { chooseUser(); return; }
+  const t = state.todos.find((x) => x.id === id);
+  if (!t || state.todoChecking.has(id)) return;
+  if (t.done) {
+    const open = todoLists(t.owner).open;
+    const position = open.length ? open[open.length - 1].position + 1 : 0;
+    mutate(id, { done: false, done_at: null, done_by: null, position }, { action: 'toggle', done: false, position }, 'todos');
+    return;
+  }
+  // Strike it through where it is, then let it slide down to Done.
+  const before = t.position;
+  state.todoChecking.add(id);
+  playTick();
+  render();
+  setTimeout(() => {
+    state.todoChecking.delete(id);
+    mutate(id, { done: true, done_at: new Date().toISOString(), done_by: state.user }, { action: 'toggle', done: true }, 'todos');
+    showToast(`Done: ${readableText(t.text).slice(0, 60)}`, {
+      undo: () => mutate(id, { done: false, done_at: null, done_by: null, position: before }, { action: 'toggle', done: false, position: before }, 'todos'),
+    });
+  }, 420);
+}
+
+function startTodoEdit(id) {
+  const li = els.todoDrawer.querySelector(`.todo[data-todo-id="${CSS.escape(id)}"]`);
+  const t = state.todos.find((x) => x.id === id);
+  if (!li || !t || t.done) return;
+  if (state.todoEditing) finishTodoEdit(false);
+  state.todoEditing = id;
+  const box = li.querySelector('.ttext');
+  const ta = document.createElement('textarea');
+  ta.className = 'tedit'; ta.maxLength = 500; ta.rows = 1; ta.value = readableText(t.text);
+  ta.setAttribute('aria-label', 'Edit to-do');
+  box.replaceWith(ta);
+  const grow = () => { ta.style.height = 'auto'; ta.style.height = `${ta.scrollHeight}px`; };
+  grow();
+  ta.addEventListener('input', grow);
+  ta.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); finishTodoEdit(false); }
+    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finishTodoEdit(true); }
+  });
+  ta.addEventListener('blur', () => { if (state.todoEditing === id) finishTodoEdit(false); });
+  ta.focus();
+  ta.setSelectionRange(ta.value.length, ta.value.length);
+}
+function finishTodoEdit(cancel) {
+  const id = state.todoEditing;
+  if (!id) return;
+  const ta = els.todoDrawer.querySelector('.tedit');
+  const value = ta ? ta.value.replace(/\s+/g, ' ').trim() : '';
+  state.todoEditing = null;
+  const t = state.todos.find((x) => x.id === id);
+  if (!cancel && t && value && value !== readableText(t.text)) {
+    mutate(id, { text: value, updated_at: new Date().toISOString() }, { action: 'edit', text: value }, 'todos');
+  } else render();
+}
+
+// Position for an item dropped at `index` among `list` (which excludes the item itself).
+function positionAt(list, index) {
+  const prev = list[index - 1];
+  const next = list[index];
+  if (prev && next) return (prev.position + next.position) / 2;
+  if (prev) return prev.position + 1;
+  if (next) return next.position - 1;
+  return 0;
+}
+function moveTodo(id, index) {
+  const t = state.todos.find((x) => x.id === id);
+  if (!t) return;
+  let list = todoLists(t.owner).open.filter((x) => x.id !== id);
+  index = Math.max(0, Math.min(index, list.length));
+  const prev = list[index - 1];
+  const next = list[index];
+  // After many moves between the same two items the gap gets tiny: renumber the list first.
+  if (prev && next && Math.abs(next.position - prev.position) < 1e-6) {
+    list.forEach((x, i) => { if (x.position !== i) mutate(x.id, { position: i }, { action: 'move', position: i }, 'todos'); });
+    list = todoLists(t.owner).open.filter((x) => x.id !== id);
+  }
+  const position = positionAt(list, index);
+  if (position === t.position) return;
+  mutate(id, { position }, { action: 'move', position }, 'todos');
+}
+
+// Drag to reorder: pointer events so it works with a mouse and on phones.
+function startTodoDrag(e, grip) {
+  const li = grip.closest('.todo');
+  const ul = els.todoOpenList;
+  const items = [...ul.querySelectorAll('.todo')];
+  const from = items.indexOf(li);
+  if (from < 0 || items.length < 2) return;
+  e.preventDefault();
+  grip.setPointerCapture?.(e.pointerId);
+  const h = li.offsetHeight;
+  const mids = items.map((x) => x.offsetTop + x.offsetHeight / 2);
+  state.todoDrag = { id: li.dataset.todoId, li, items, from, to: from, h, mids, startY: e.clientY, y: e.clientY, startScroll: els.todoScroll.scrollTop, raf: 0, moved: false };
+  li.classList.add('lift');
+  ul.classList.add('sorting');
+  const frame = () => {
+    const d = state.todoDrag;
+    if (!d) return;
+    const r = els.todoScroll.getBoundingClientRect();
+    if (d.y < r.top + 48) els.todoScroll.scrollTop -= 8;
+    else if (d.y > r.bottom - 48) els.todoScroll.scrollTop += 8;
+    const dy = d.y - d.startY + (els.todoScroll.scrollTop - d.startScroll);
+    if (Math.abs(dy) > 3) d.moved = true;
+    d.li.style.transform = `translateY(${dy}px)`;
+    const center = d.li.offsetTop + d.h / 2 + dy;
+    let to = 0;
+    d.items.forEach((x, i) => { if (i !== d.from && d.mids[i] < center) to += 1; });
+    d.to = to;
+    d.items.forEach((x, i) => {
+      if (i === d.from) return;
+      let shift = 0;
+      if (d.from < to && i > d.from && i <= to) shift = -d.h;
+      if (d.from > to && i >= to && i < d.from) shift = d.h;
+      x.style.transform = shift ? `translateY(${shift}px)` : '';
+    });
+    d.raf = requestAnimationFrame(frame);
+  };
+  state.todoDrag.raf = requestAnimationFrame(frame);
+}
+function moveTodoDrag(e) { if (state.todoDrag) state.todoDrag.y = e.clientY; }
+function endTodoDrag() {
+  const d = state.todoDrag;
+  if (!d) return;
+  cancelAnimationFrame(d.raf);
+  state.todoDrag = null;
+  els.todoOpenList.classList.remove('sorting');
+  d.items.forEach((x) => { x.style.transform = ''; x.classList.remove('lift'); });
+  if (d.moved && d.to !== d.from) moveTodo(d.id, d.to);
+  else render();
+}
+
+function openTodoMenu(t, anchor, point) {
+  const today = startOfToday();
+  const tomorrow = new Date(today.getTime() + DAY + 3600000);
+  const other = otherUser(t.owner);
+  const linkLabel = t.link_label ? escapeHtml(t.link_label) : '';
+  const items = t.done ? '<button role="menuitem" class="menu-item danger" data-menu="tdelete">Delete</button>' : `
+    <div class="menu-title">Due</div>
+    <button role="menuitem" class="menu-item" data-menu="due" data-due="${dayKey(today)}">Today${t.due_on === dayKey(today) ? '<span class="menu-check" aria-hidden="true">✓</span>' : ''}</button>
+    <button role="menuitem" class="menu-item" data-menu="due" data-due="${dayKey(tomorrow)}">Tomorrow${t.due_on === dayKey(tomorrow) ? '<span class="menu-check" aria-hidden="true">✓</span>' : ''}</button>
+    <label class="menu-item menu-date">Pick a date<input type="date" data-todo-date value="${escapeHtml(t.due_on || '')}" aria-label="Due date" /></label>
+    ${t.due_on ? '<button role="menuitem" class="menu-item" data-menu="due" data-due="">No due date</button>' : ''}
+    <div class="menu-sep"></div>
+    <button role="menuitem" class="menu-item" data-menu="tmove">Move to ${other}’s list</button>
+    ${t.link_kind ? `<button role="menuitem" class="menu-item" data-menu="unlink">Unlink ${linkLabel}</button>` : ''}
+    <button role="menuitem" class="menu-item danger" data-menu="tdelete">Delete</button>`;
+  showRowMenu(t.id, 'todo', items, anchor, point);
+}
+function setTodoDue(t, due) {
+  const prev = t.due_on || null;
+  const next = due || null;
+  if (prev === next) return;
+  mutate(t.id, { due_on: next }, { action: 'due', due_on: next }, 'todos');
+}
+function todoMenuAction(t, item) {
+  const what = item.dataset.menu;
+  if (what === 'due') { closeRowMenu(); setTodoDue(t, item.dataset.due); return; }
+  if (what === 'unlink') { closeRowMenu(); mutate(t.id, { link_kind: null, link_id: null, link_label: null }, { action: 'unlink' }, 'todos'); return; }
+  if (what === 'tmove') {
+    closeRowMenu();
+    const from = t.owner;
+    const to = otherUser(from);
+    const back = t.position;
+    const open = todoLists(to).open;
+    const position = open.length ? open[0].position - 1 : 0;
+    mutate(t.id, { owner: to, position }, { action: 'move', owner: to, position }, 'todos');
+    showToast(`Moved to ${to}’s list`, { undo: () => mutate(t.id, { owner: from, position: back }, { action: 'move', owner: from, position: back }, 'todos') });
+    return;
+  }
+  if (what === 'tdelete') { closeRowMenu(); deleteTodo(t.id); }
+}
+async function deleteTodo(id) {
+  if (!state.user) { chooseUser(); return; }
+  const row = state.todos.find((x) => x.id === id);
+  if (!row) return;
+  const snapshot = { ...row };
+  delete snapshot.pending; delete snapshot.notes; delete snapshot.people;
+  const run = (state.inflight.get(id) || Promise.resolve()).catch(() => {}).then(() => {
+    state.todos = state.todos.filter((x) => x.id !== id);
+    render();
+    return api('todos', { method: 'PATCH', body: JSON.stringify({ id, actor: state.user, action: 'delete' }) });
+  });
+  state.inflight.set(id, run);
+  try { await run; } catch (err) {
+    if (!state.todos.some((x) => x.id === id)) state.todos.push(snapshot);
+    render();
+    showToast(`Couldn't delete: ${err.message}`, { error: true });
+    return;
+  } finally { if (state.inflight.get(id) === run) state.inflight.delete(id); }
+  showToast(`Deleted: ${readableText(row.text).slice(0, 60)}`, {
+    undo: async () => {
+      try {
+        const res = await api('todos', { method: 'POST', body: JSON.stringify({ actor: state.user, restore: snapshot }) });
+        if (!state.todos.some((x) => x.id === id)) state.todos.push(res.todo || snapshot);
+        render();
+      } catch (err) { showToast(`Couldn't restore: ${err.message}`, { error: true }); }
+    },
+  });
+}
+
+els.todoBtn.addEventListener('click', () => (state.todoOpen ? closeTodos() : openTodos()));
+els.closeTodo.addEventListener('click', closeTodos);
+els.todoBackdrop.addEventListener('click', closeTodos);
+els.todoForm.addEventListener('submit', (e) => { e.preventDefault(); addTodo(); });
+els.todoInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Backspace' && !els.todoInput.value && state.todoDraftLink) { state.todoDraftLink = null; renderTodos(); }
+});
+els.todoDraft.addEventListener('click', (e) => {
+  if (e.target.closest('[data-todo-draft-clear]')) { state.todoDraftLink = null; renderTodos(); els.todoInput.focus(); }
+});
+els.todoSwitch.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-todo-view]');
+  if (!b || b.dataset.todoView === state.todoView) return;
+  if (state.todoEditing) finishTodoEdit(false);
+  state.todoView = b.dataset.todoView;
+  renderTodos();
+});
+els.todoScroll.addEventListener('click', (e) => {
+  if (e.target.closest('[data-todo-done-toggle]')) {
+    state.todoDoneCollapsed = !state.todoDoneCollapsed;
+    store.set('jobSprintTodoDone', state.todoDoneCollapsed ? 'collapsed' : 'open');
+    renderTodos();
+    return;
+  }
+  const li = e.target.closest('.todo[data-todo-id]');
+  if (!li) return;
+  const id = li.dataset.todoId;
+  const t = state.todos.find((x) => x.id === id);
+  if (!t) return;
+  if (e.target.closest('[data-todo-check]')) { toggleTodo(id); return; }
+  if (e.target.closest('[data-todo-menu]')) {
+    const btn = e.target.closest('[data-todo-menu]');
+    if (els.rowMenu.dataset.id === id && !els.rowMenu.classList.contains('hidden')) closeRowMenu(); else openTodoMenu(t, btn);
+    return;
+  }
+  if (e.target.closest('[data-todo-link]')) {
+    const kind = t.link_kind === 'company' ? 'company' : 'job';
+    if (!linkTarget(t)) return;
+    closeTodos();
+    openNotes(t.link_id, kind);
+    return;
+  }
+  if (e.target.closest('a')) return; // links inside the text open normally
+  if (e.target.closest('[data-todo-text]')) startTodoEdit(id);
+});
+els.todoScroll.addEventListener('contextmenu', (e) => {
+  const li = e.target.closest('.todo[data-todo-id]');
+  if (!li || e.target.closest('a, textarea')) return;
+  const t = state.todos.find((x) => x.id === li.dataset.todoId);
+  if (!t) return;
+  e.preventDefault();
+  openTodoMenu(t, null, { x: e.clientX, y: e.clientY });
+});
+els.todoOpenList.addEventListener('pointerdown', (e) => {
+  const grip = e.target.closest('[data-todo-grip]');
+  if (grip && e.button === 0 && !state.todoEditing) startTodoDrag(e, grip);
+});
+els.todoOpenList.addEventListener('pointermove', moveTodoDrag);
+els.todoOpenList.addEventListener('pointerup', endTodoDrag);
+els.todoOpenList.addEventListener('pointercancel', endTodoDrag);
+els.todoOpenList.addEventListener('lostpointercapture', endTodoDrag);
+// Keyboard reorder: focus the grip, then use the arrow keys.
+els.todoOpenList.addEventListener('keydown', (e) => {
+  const grip = e.target.closest('[data-todo-grip]');
+  if (!grip || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+  e.preventDefault();
+  const id = grip.closest('.todo').dataset.todoId;
+  const t = state.todos.find((x) => x.id === id);
+  const open = todoLists(t.owner).open;
+  const i = open.findIndex((x) => x.id === id);
+  const to = e.key === 'ArrowUp' ? i - 1 : i + 1;
+  if (to < 0 || to >= open.length) return;
+  moveTodo(id, to);
+  els.todoOpenList.querySelector(`.todo[data-todo-id="${CSS.escape(id)}"] [data-todo-grip]`)?.focus();
+});
+els.rowMenu.addEventListener('change', (e) => {
+  const input = e.target.closest('[data-todo-date]');
+  if (!input || els.rowMenu.dataset.kind !== 'todo') return;
+  const t = state.todos.find((x) => x.id === els.rowMenu.dataset.id);
+  closeRowMenu();
+  if (t && input.value) setTodoDue(t, input.value);
 });
 
 /* ---------- Keyboard ---------- */
 document.addEventListener('keydown', (e) => {
   const typing = e.target.closest && e.target.closest('input, textarea');
-  if (e.key === '/' && !typing && els.blockModal.classList.contains('hidden') && els.companyModal.classList.contains('hidden') && !state.notesJobId) {
+  if (e.key === '/' && !typing && els.blockModal.classList.contains('hidden') && els.companyModal.classList.contains('hidden') && !state.notesJobId && !state.todoOpen) {
     e.preventDefault();
     els.jobUrl.focus();
   } else if (e.key === 'Escape') {
     if (!els.rowMenu.classList.contains('hidden')) closeRowMenu();
+    else if (state.todoEditing) { /* the edit box handles its own Escape */ }
+    else if (state.todoOpen) closeTodos();
     else if (!els.companyModal.classList.contains('hidden')) closeCompanyModal();
     else if (state.notesJobId) closeNotes();
     else if (!els.blockModal.classList.contains('hidden')) closeBlockModal();
