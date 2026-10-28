@@ -19,7 +19,9 @@ const CLEARED_NETWORK = {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const JOB_COLUMNS = ['id', 'company', 'title', 'location', 'url', 'status', 'added_by', 'added_at', 'applied_by', 'applied_at',
   'blocked_by', 'blocked_at', 'blocked_reason', 'assigned_to', 'network_status', 'network_updated_by', 'network_updated_at',
-  'network_closed_by', 'network_closed_at', 'notes', 'updated_at'];
+  'network_closed_by', 'network_closed_at', 'notes', 'priority', 'updated_at'];
+
+const isPriority = (v) => typeof v === 'number' && Number.isFinite(v) && Math.abs(v) < 1e12;
 
 // Undo for Delete: the browser sends the deleted row back. Only known columns, each checked.
 function cleanRestoredJob(row) {
@@ -40,6 +42,7 @@ function cleanRestoredJob(row) {
   if (out.location !== undefined && !str(out.location, 300)) return { error: 'Invalid location.' };
   if (out.blocked_reason !== undefined && !str(out.blocked_reason, 500)) return { error: 'Invalid reason.' };
   if (out.notes !== undefined && (!Array.isArray(out.notes) || out.notes.length > NOTE_MAX_COUNT)) return { error: 'Invalid notes.' };
+  if (out.priority != null && !isPriority(out.priority)) return { error: 'Invalid priority.' };
   return { row: out };
 }
 
@@ -138,6 +141,13 @@ async function handlePatch(body) {
     const owner = body.assigned_to;
     if (owner !== null && !USERS.includes(owner)) return bad('Choose Garima, Indresh, or Unassigned.');
     const job = await patchJob(byId(id), { assigned_to: owner, updated_at: now });
+    return job ? json(200, { job }) : json(404, { error: 'Job not found.' });
+  }
+
+  // Priority order on the To apply list. Only the order changes, so updated_at is left alone.
+  if (action === 'priority') {
+    if (body.priority !== null && !isPriority(body.priority)) return bad('Invalid priority.');
+    const job = await patchJob(byId(id), { priority: body.priority });
     return job ? json(200, { job }) : json(404, { error: 'Job not found.' });
   }
 

@@ -50,6 +50,8 @@ const state = {
   todoDrag: null,       // drag state while reordering
   todoChecking: new Set(), // ids mid tick animation
   todoDoneCollapsed: store.get('jobSprintTodoDone') === 'collapsed',
+  openView: store.get('jobSprintOpenView') === 'date' ? 'date' : 'priority', // To apply: 'priority' | 'date'
+  prioDrag: null,       // drag state while reordering To apply
 };
 let refreshTimer = null;
 
@@ -234,7 +236,7 @@ async function api(path, options = {}) {
 }
 
 async function loadJobs({ silent = false } = {}) {
-  if (state.loading || state.inflight.size) return false; // don't clobber optimistic changes mid-flight
+  if (state.loading || state.inflight.size || state.prioDrag) return false; // don't clobber optimistic changes mid-flight
   state.loading = true;
   if (!state.loadedOnce) {
     els.loadingState.classList.remove('hidden');
@@ -459,10 +461,19 @@ function openLink(job) {
   return `<a class="btn ghost small" href="${escapeHtml(safeJobUrl(job.url))}" target="_blank" rel="noopener">Open ↗</a>`;
 }
 
-function openRow(job) {
+const GRIP_ICON = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>';
+// rank: a number (Priority list), '–' (waiting in To rank), or undefined (Date added view).
+function prioCell(job, rank) {
+  const ranked = rank !== '–';
+  const label = `${ranked ? `Priority ${rank}` : 'Not ranked yet'}: ${readableText(job.title || 'job')}. Drag to reorder, or use the arrow keys.`;
+  return `<span class="prio"><button type="button" class="pgrip" data-prio-grip aria-label="${escapeHtml(label)}" title="Drag to reorder">${GRIP_ICON}</button><span class="rank${ranked ? (rank <= 3 ? ' top' : '') : ' none'}" aria-hidden="true">${rank}</span></span>`;
+}
+function openRow(job, rank) {
+  const cls = rank === undefined ? '' : rank === '–' ? ' torank-row' : ' ranked-row';
   return `
-    <article class="job-row" data-id="${escapeHtml(job.id)}">
+    <article class="job-row${cls}" data-id="${escapeHtml(job.id)}">
       <div class="job-main">
+        ${rank === undefined ? '' : prioCell(job, rank)}
         ${ownerCircle(job)}
         ${ageBadge(job)}
         <div class="job-text">
@@ -651,12 +662,37 @@ function renderTiles(b) {
   els.statNetworkingSub.textContent = net.length ? (parts.join(' · ') || 'All in progress') : 'Applied jobs land here';
 }
 
+// Priority view: one ranked list (smaller priority = higher), plus new jobs waiting in "To rank".
+function prioLists(b) {
+  let list = b.open;
+  if (state.filter === 'today') list = b.today;
+  else if (state.filter === 'backlog') list = b.backlog;
+  return {
+    torank: list.filter((j) => j.priority == null).sort((x, y) => new Date(y.added_at) - new Date(x.added_at)),
+    ranked: list.filter((j) => j.priority != null).sort((x, y) => x.priority - y.priority || new Date(x.added_at) - new Date(y.added_at)),
+  };
+}
 function renderOpen(b) {
+  if (state.openView === 'priority') {
+    const { torank, ranked } = prioLists(b);
+    if (!torank.length && !ranked.length) return renderOpenDate(b);
+    let html = '';
+    if (torank.length) {
+      html += group(`To rank · ${torank.length}`, '<span class="hint-long">New jobs · drag into place, or ⋯ → Move to top</span><span class="hint-short">Drag into place</span>', 'torank', torank.map((j) => openRow(j, '–')).join(''));
+    }
+    const whose = state.ownerFilter === 'Garima' || state.ownerFilter === 'Indresh' ? `${state.ownerFilter}’s order · ` : '';
+    html += group(`Priority · ${ranked.length}`, `${whose}<span class="hint-long">drag ⠿ to reorder · top = apply next</span><span class="hint-short">drag ⠿ to reorder</span>`, 'ranked',
+      ranked.length ? ranked.map((j, i) => openRow(j, i + 1)).join('') : '<div class="prio-empty">Drag a job here to start your priority list.</div>');
+    return { html };
+  }
+  return renderOpenDate(b);
+}
+function renderOpenDate(b) {
   let html = '';
   const showBacklog = state.filter !== 'today' && b.backlog.length;
   const showToday = state.filter !== 'backlog' && b.today.length;
-  if (showBacklog) html += group('Backlog', `${b.backlog.length} from earlier days · oldest first`, 'backlog', b.backlog.map(openRow).join(''));
-  if (showToday) html += group('Added today', `${b.today.length} open · newest first`, '', b.today.map(openRow).join(''));
+  if (showBacklog) html += group('Backlog', `${b.backlog.length} from earlier days · oldest first`, 'backlog', b.backlog.map((j) => openRow(j)).join(''));
+  if (showToday) html += group('Added today', `${b.today.length} open · newest first`, '', b.today.map((j) => openRow(j)).join(''));
   if (html) return { html };
   if (state.filter === 'backlog') return { empty: ['✓', 'Backlog cleared', 'Nothing left over from earlier days.', true] };
   if (state.filter === 'today') return { empty: ['✓', 'Nothing left from today', 'Paste a job link at the top to add one.', true] };
@@ -998,9 +1034,19 @@ function renderOwnerBar() {
   els.ownerBar.innerHTML = `<span class="owner-label">Owner</span>${OWNER_FILTERS.map(([key, label]) => {
     const n = key === 'all' ? base.length : key === 'none' ? base.filter((x) => !x.assigned_to).length : base.filter((x) => x.assigned_to === key).length;
     return `<button class="subfilter${key === state.ownerFilter ? ' active' : ''}" data-owner-filter="${key}" aria-pressed="${key === state.ownerFilter}">${label} <span>${n}</span></button>`;
-  }).join('')}`;
+  }).join('')}${state.tab === 'open' ? `<div class="view-toggle" role="group" aria-label="Order the list by">${[
+    ['priority', 'Priority', '<path d="M4 7h11M4 12h8M4 17h5M18 5v14M15 16l3 3 3-3"/>'],
+    ['date', 'Date added', '<rect x="3.5" y="5" width="17" height="15" rx="3"/><path d="M8 3v4M16 3v4M3.5 10h17"/>'],
+  ].map(([key, label, icon]) => `<button type="button" class="${state.openView === key ? 'on' : ''}" data-open-view="${key}" aria-pressed="${state.openView === key}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icon}</svg>${label}</button>`).join('')}</div>` : ''}`;
 }
 els.ownerBar.addEventListener('click', (e) => {
+  const v = e.target.closest('[data-open-view]');
+  if (v) {
+    state.openView = v.dataset.openView;
+    store.set('jobSprintOpenView', state.openView);
+    render();
+    return;
+  }
   const chip = e.target.closest('[data-owner-filter]');
   if (!chip) return;
   state.ownerFilter = chip.dataset.ownerFilter;
@@ -1010,6 +1056,7 @@ els.ownerBar.addEventListener('click', (e) => {
 
 function render() {
   renderTodos();
+  if (state.prioDrag) return; // the list is rebuilt when the drag ends
   const b = buckets();
   renderTiles(b);
 
@@ -1046,7 +1093,9 @@ function render() {
   if (empty && state.ownerFilter !== 'all' && tabBase()?.length) {
     empty = ['–', state.ownerFilter === 'none' ? 'Nothing unassigned here' : `Nothing for ${state.ownerFilter} here`, 'Switch to Everyone to see the rest.', false];
   }
+  const focusGrip = document.activeElement?.closest?.('[data-prio-grip]') && document.activeElement.closest('.job-row')?.dataset.id;
   els.jobList.innerHTML = html;
+  if (focusGrip) els.jobList.querySelector(`.job-row[data-id="${CSS.escape(focusGrip)}"] [data-prio-grip]`)?.focus({ preventScroll: true });
   const showEmpty = !!empty && (state.tab === 'discover' ? state.discoverLoaded : state.tab === 'companies' ? state.companiesLoaded : state.loadedOnce);
   els.emptyState.classList.toggle('hidden', !showEmpty);
   if (empty) {
@@ -1486,7 +1535,10 @@ function openRowMenu(id, kind, anchor, point) {
   const items = kind === 'company'
     ? '<button role="menuitem" class="menu-item" data-menu="open">Open people &amp; notes</button>'
     : '<button role="menuitem" class="menu-item" data-menu="copy">Copy job link</button>';
-  showRowMenu(id, kind, `${items}<button role="menuitem" class="menu-item" data-menu="todo">Add to-do…</button><button role="menuitem" class="menu-item danger" data-menu="delete">Delete…</button>`, anchor, point);
+  const prio = kind === 'job' && state.openView === 'priority' && stageOf(entry) === 'open'
+    ? '<button role="menuitem" class="menu-item" data-menu="ptop">Move to top</button><button role="menuitem" class="menu-item" data-menu="pbottom">Move to bottom</button><div class="menu-sep"></div>'
+    : '';
+  showRowMenu(id, kind, `${prio}${items}<button role="menuitem" class="menu-item" data-menu="todo">Add to-do…</button><button role="menuitem" class="menu-item danger" data-menu="delete">Delete…</button>`, anchor, point);
 }
 function openOwnerMenu(id, kind, anchor) {
   const entry = entryOf(id, kind);
@@ -1521,6 +1573,7 @@ els.rowMenu.addEventListener('click', async (e) => {
   const entry = entryOf(id, kind);
   if (!entry) { closeRowMenu(); return; }
   if (kind === 'todo') { todoMenuAction(entry, item); return; }
+  if (item.dataset.menu === 'ptop' || item.dataset.menu === 'pbottom') { closeRowMenu(); moveJobToEnd(id, item.dataset.menu === 'ptop'); return; }
   if (item.dataset.menu === 'todo') {
     closeRowMenu();
     const label = kind === 'company' ? readableText(entry.name) : readableText(entry.company || entry.title || 'Job');
@@ -1778,6 +1831,120 @@ document.addEventListener('paste', (e) => {
   if (!els.userModal.classList.contains('hidden') || !els.blockModal.classList.contains('hidden') || !els.companyModal.classList.contains('hidden') || state.notesJobId || state.todoOpen) return;
   const text = (e.clipboardData && e.clipboardData.getData('text')) || '';
   if (isHttpUrl(text)) { e.preventDefault(); startAdd(text); }
+});
+
+/* ---------- Priority order on To apply ---------- */
+function openJobsRanked() {
+  return state.jobs.filter((j) => stageOf(j) === 'open' && j.priority != null).sort((a, b) => a.priority - b.priority);
+}
+function setPriority(id, priority) {
+  return mutate(id, { priority }, { action: 'priority', priority });
+}
+// Places a job at `index` among the jobs currently shown in the Priority list (`shownIds`, without the job).
+// Works in a filtered view too: the new number sits between its visible neighbours.
+function placeJob(id, index, shownIds) {
+  const byId = (x) => state.jobs.find((j) => j.id === x);
+  let shown = shownIds.map(byId).filter((j) => j && j.priority != null);
+  index = Math.max(0, Math.min(index, shown.length));
+  const gap = (list) => list[index - 1] && list[index] && Math.abs(list[index].priority - list[index - 1].priority) < 1e-6;
+  if (gap(shown)) {
+    // After many moves between the same two jobs the numbers get too close: renumber everyone once.
+    openJobsRanked().forEach((j, i) => { if (j.priority !== i + 1) setPriority(j.id, i + 1); });
+    shown = shownIds.map(byId).filter((j) => j && j.priority != null);
+  }
+  const prev = shown[index - 1];
+  const next = shown[index];
+  const priority = prev && next ? (prev.priority + next.priority) / 2 : prev ? prev.priority + 1 : next ? next.priority - 1 : 1;
+  const job = byId(id);
+  if (!job || job.priority === priority) return;
+  setPriority(id, priority);
+}
+function moveJobToEnd(id, toTop) {
+  if (!state.user) { chooseUser(); return; }
+  const job = state.jobs.find((j) => j.id === id);
+  if (!job) return;
+  const others = openJobsRanked().filter((j) => j.id !== id);
+  const before = job.priority ?? null;
+  const priority = others.length ? (toTop ? others[0].priority - 1 : others[others.length - 1].priority + 1) : 1;
+  if (before !== null && (toTop ? !others.length || before < others[0].priority : !others.length || before > others[others.length - 1].priority)) {
+    showToast(`Already at the ${toTop ? 'top' : 'bottom'}`);
+    return;
+  }
+  setPriority(id, priority);
+  showToast(`${toTop ? 'Moved to top' : 'Moved to bottom'}: ${jobLabel(job)}`, { undo: () => setPriority(id, before) });
+}
+const shownRankedIds = (exceptId) => [...els.jobList.querySelectorAll('.job-row.ranked-row')].map((r) => r.dataset.id).filter((x) => x !== exceptId);
+
+// Drag with a mouse or a finger: the row follows the pointer and a line shows where it will land.
+function startPrioDrag(e, grip) {
+  const row = grip.closest('.job-row');
+  if (!row || !state.user) { if (!state.user) chooseUser(); return; }
+  e.preventDefault();
+  grip.setPointerCapture?.(e.pointerId);
+  els.jobList.classList.add('prio-sorting');
+  const line = document.createElement('div');
+  line.className = 'prio-drop';
+  line.hidden = true;
+  els.jobList.appendChild(line);
+  const ranked = row.classList.contains('ranked-row');
+  const from = ranked ? [...els.jobList.querySelectorAll('.job-row.ranked-row')].indexOf(row) : -1;
+  state.prioDrag = { id: row.dataset.id, row, line, ranked, from, to: null, startY: e.clientY, y: e.clientY, startScroll: window.scrollY, moved: false, raf: 0 };
+  row.classList.add('lift');
+  const frame = () => {
+    const d = state.prioDrag;
+    if (!d) return;
+    if (d.y < 70) window.scrollBy(0, -12);
+    else if (d.y > innerHeight - 70) window.scrollBy(0, 12);
+    const dy = d.y - d.startY + (window.scrollY - d.startScroll);
+    if (Math.abs(dy) > 4) d.moved = true;
+    d.row.style.transform = `translateY(${dy}px)`;
+    const targets = [...els.jobList.querySelectorAll('.job-row.ranked-row')].filter((r) => r !== d.row);
+    const rects = targets.map((r) => r.getBoundingClientRect());
+    d.to = rects.filter((rc) => rc.top + rc.height / 2 < d.y).length;
+    const box = els.jobList.getBoundingClientRect();
+    let y;
+    if (!targets.length) { const ph = els.jobList.querySelector('.prio-empty'); y = ph ? ph.getBoundingClientRect().top + ph.offsetHeight / 2 : null; }
+    else y = d.to < rects.length ? rects[d.to].top : rects[rects.length - 1].bottom;
+    const same = d.ranked && d.to === d.from;
+    d.line.hidden = !d.moved || same || y == null;
+    if (y != null) d.line.style.top = `${y - box.top - 1.5}px`;
+    d.raf = requestAnimationFrame(frame);
+  };
+  state.prioDrag.raf = requestAnimationFrame(frame);
+}
+function endPrioDrag() {
+  const d = state.prioDrag;
+  if (!d) return;
+  cancelAnimationFrame(d.raf);
+  state.prioDrag = null;
+  d.line.remove();
+  d.row.classList.remove('lift');
+  d.row.style.transform = '';
+  els.jobList.classList.remove('prio-sorting');
+  const shown = shownRankedIds(d.id);
+  if (d.moved && d.to != null && !(d.ranked && d.to === d.from)) placeJob(d.id, d.to, shown);
+  else render();
+}
+els.jobList.addEventListener('pointerdown', (e) => {
+  const grip = e.target.closest('[data-prio-grip]');
+  if (grip && e.button === 0) startPrioDrag(e, grip);
+});
+els.jobList.addEventListener('pointermove', (e) => { if (state.prioDrag) state.prioDrag.y = e.clientY; });
+['pointerup', 'pointercancel', 'lostpointercapture'].forEach((t) => els.jobList.addEventListener(t, endPrioDrag));
+// Keyboard: focus the handle, then arrow keys move the job one place (a new job joins at the top).
+els.jobList.addEventListener('keydown', (e) => {
+  const grip = e.target.closest('[data-prio-grip]');
+  if (!grip || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+  e.preventDefault();
+  if (!state.user) { chooseUser(); return; }
+  const row = grip.closest('.job-row');
+  const id = row.dataset.id;
+  if (!row.classList.contains('ranked-row')) { placeJob(id, 0, shownRankedIds(id)); return; }
+  const all = [...els.jobList.querySelectorAll('.job-row.ranked-row')].map((r) => r.dataset.id);
+  const i = all.indexOf(id);
+  const to = e.key === 'ArrowUp' ? i - 1 : i + 1;
+  if (to < 0 || to >= all.length) return;
+  placeJob(id, to, shownRankedIds(id));
 });
 
 /* ---------- To-do (one list each for Garima and Indresh) ---------- */

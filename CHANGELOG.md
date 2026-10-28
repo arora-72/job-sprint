@@ -4,6 +4,17 @@ Changes to Job Sprint are recorded here. The initial Git snapshot is `v1.0.0`. E
 
 ## Unreleased
 
+### Priority order on To apply
+
+- To apply has a new switch: **Priority | Date added**. Priority is the default, and each browser remembers the last choice. Date added is the old view, unchanged.
+- Priority view is one ranked list. Each row shows a drag handle (⠿) and its rank; the top 3 ranks are in clay. Drag with a mouse or a finger and a line shows where the row will land. The page scrolls when you drag near the edge.
+- New jobs (pasted links and Discover adds) wait in a **To rank** group at the top until you drag them into place or use ⋯ → **Move to top**.
+- ⋯ menu adds **Move to top** and **Move to bottom**, each with Undo. Keyboard: focus the handle and use the arrow keys.
+- The owner filter shows each person's own order: pick Indresh to see his jobs numbered 1, 2, 3. Dragging there only changes his order; Garima's jobs keep their order.
+- Applied, Undo, Delete and Undo keep a job's rank. Reordering doesn't change when a job was last updated.
+- Existing open jobs start ranked in the Date added order (backlog oldest first, then today's newest first), so nothing looks scrambled.
+- Database: new `priority` column on jobs (`supabase/priority.sql`), with a backup of the jobs table first (`backup.jobs_before_priority`).
+
 ### To-do lists
 
 - New **To-do** button in the header opens a side panel (a bottom sheet on phones). Garima and Indresh each have their own list, with a switch at the top. It opens on yours.

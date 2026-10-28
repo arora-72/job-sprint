@@ -891,3 +891,42 @@ button.tchip:hover { border-color: var(--accent); color: var(--text); }
 }
 /* Phones: the new button needs the room, so the user pill shows just the circle. */
 @media (max-width: 480px) { #activeUser, .user-pill .chev { display: none; } .user-pill { padding-right: 4px; } }
+
+/* ---------- Priority order (To apply) ---------- */
+:root { --prio-w: 46px; }
+.view-toggle { margin-left: auto; display: inline-flex; padding: 3px; gap: 2px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--border); }
+.view-toggle button { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border: 0; border-radius: 7px; background: transparent; color: var(--text-2); font-size: 12.5px; font-weight: 600; transition: background .15s, color .15s; }
+.view-toggle button:hover { color: var(--text); }
+.view-toggle button svg { width: 14px; height: 14px; }
+.view-toggle button.on { background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm), 0 0 0 1px var(--border); }
+.view-toggle button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.prio { flex: none; display: flex; align-items: center; gap: 2px; width: 34px; }
+.pgrip { width: 18px; height: 30px; padding: 0; border: 0; background: transparent; display: grid; place-items: center; color: var(--text-3); opacity: .35; cursor: grab; border-radius: 5px; touch-action: none; transition: opacity .15s, color .15s; }
+.pgrip svg { width: 15px; height: 15px; }
+.job-row:hover .pgrip, .pgrip:focus-visible { opacity: 1; }
+.pgrip:hover { color: var(--text); }
+.pgrip:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
+.rank { min-width: 16px; text-align: center; font-size: 13px; font-weight: 700; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.rank.top { color: var(--accent-text); }
+.rank.none { font-weight: 500; }
+.group-head.torank { color: var(--accent-text); background: var(--accent-soft); }
+.torank-row { background: color-mix(in srgb, var(--accent-soft) 35%, var(--surface)); }
+.torank-row .pgrip { opacity: .8; color: var(--accent-text); }
+.group-hint .hint-short { display: none; }
+.prio-empty { padding: 22px 20px; text-align: center; color: var(--text-3); font-size: 13px; border-top: 1px dashed var(--border-strong); }
+/* While dragging */
+.prio-sorting { position: relative; }
+.prio-sorting, .prio-sorting * { user-select: none; -webkit-user-select: none; }
+.job-row.lift { position: relative; z-index: 5; background: var(--surface); box-shadow: var(--shadow-lg), 0 0 0 1px var(--border-strong); border-radius: 10px; cursor: grabbing; animation: none; }
+.job-row.lift .pgrip { opacity: 1; color: var(--accent-text); cursor: grabbing; }
+.prio-drop { position: absolute; left: 16px; right: 16px; height: 3px; border-radius: 3px; background: var(--accent); z-index: 4; pointer-events: none; box-shadow: 0 0 0 3px var(--ring); }
+@media (max-width: 1000px) {
+  .ranked-row .job-meta, .torank-row .job-meta { padding-left: calc(52px + var(--own-w) + var(--prio-w)); }
+}
+@media (max-width: 720px) {
+  .ranked-row .job-meta, .torank-row .job-meta { padding-left: calc(52px + var(--own-w) + var(--prio-w)); }
+  .view-toggle { margin-left: 0; width: 100%; } .view-toggle button { flex: 1; justify-content: center; }
+  .pgrip { opacity: .6; width: 22px; }
+  .group-hint .hint-long { display: none; } .group-hint .hint-short { display: inline; }
+}
+@media (hover: none) { .pgrip { opacity: .6; } }
