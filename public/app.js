@@ -17,6 +17,7 @@ const savedUser = store.get('jobSprintUser');
 const state = {
   user: USERS.includes(savedUser) ? savedUser : null,
   jobs: [],
+  query: '',
   discover: [],
   discoverLoaded: false,
   discoverError: null,
@@ -59,7 +60,7 @@ const els = {};
 [
   'linkedinCopy', 'linkedinLabel', 'linkedinEdit', 'linkedinForm', 'linkedinInput', 'linkedinWho', 'linkedinErr', 'linkedinCancel',
   'userModal', 'switchUser', 'activeUser', 'activeUserAvatar', 'soundToggle', 'todoBtn', 'todoCount', 'todoBackdrop', 'todoDrawer', 'todoTitle', 'todoSub', 'closeTodo',
-  'todoSwitch', 'todoForm', 'todoInput', 'todoDraft', 'todoScroll', 'todoOpenList', 'todoDoneWrap', 'themeToggle', 'themeMenu', 'paletteGrid', 'modeSeg', 'addForm', 'jobUrl', 'parseBtn',
+  'todoSwitch', 'todoForm', 'todoInput', 'todoDraft', 'todoScroll', 'todoOpenList', 'todoDoneWrap', 'themeToggle', 'themeMenu', 'searchInput', 'searchCount', 'searchClear', 'paletteGrid', 'modeSeg', 'addForm', 'jobUrl', 'parseBtn',
   'addPanel', 'addPanelUrl', 'parseConfidence', 'parseStatus', 'dupWarning', 'previewForm',
   'titleInput', 'companyInput', 'locationInput', 'cancelPreview', 'saveJob',
   'statOpenValue', 'statOpenSub', 'statAppliedValue', 'statAppliedSub', 'statTodayValue', 'statTodaySub',
@@ -1058,10 +1059,70 @@ els.ownerBar.addEventListener('click', (e) => {
   render();
 });
 
+/* ---------- Search: role or company, across every tab ---------- */
+const normText = (v) => String(v || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+const searchTerms = () => normText(state.query).split(' ').filter(Boolean);
+function searchScore(fields, terms) {
+  const hay = normText(fields.join(' '));
+  if (!terms.every((t) => hay.includes(t))) return 0;
+  const lead = normText(fields[0]).startsWith(terms[0]) || normText(fields[1]).startsWith(terms[0]);
+  return lead ? 2 : 1;
+}
+function searchHits(list, fieldsOf, terms) {
+  return list.map((x) => ({ x, s: searchScore(fieldsOf(x), terms) })).filter((r) => r.s)
+    .sort((a, b) => b.s - a.s || new Date(b.x.added_at || 0) - new Date(a.x.added_at || 0)).map((r) => r.x);
+}
+function renderSearch() {
+  const terms = searchTerms();
+  const jobFields = (j) => [j.title, j.company, j.location];
+  const hits = (stage) => searchHits(state.jobs.filter((j) => stageOf(j) === stage), jobFields, terms);
+  const open = hits('open'), net = hits('networking'), hist = hits('history');
+  const cos = searchHits(state.companies, (c) => [c.name, c.source, (c.people || []).map((p) => p.name).join(' ')], terms);
+  const disc = searchHits(state.discover, jobFields, terms);
+  const total = open.length + net.length + hist.length + cos.length + disc.length;
+  let html = '';
+  if (open.length) html += group(`To apply · ${open.length}`, 'Open roles', '', open.map((j) => openRow(j)).join(''));
+  if (net.length) html += group(`Networking · ${net.length}`, 'Applied, still networking', '', net.map(networkRow).join(''));
+  if (hist.length) html += group(`History · ${hist.length}`, 'Closed or blocked', '', hist.map(historyRow).join(''));
+  if (cos.length) html += group(`Companies · ${cos.length}`, 'Tracked companies', '', cos.map(companyRow).join(''));
+  if (disc.length) html += group(`Discover · ${disc.length}`, 'Matches to review', '', disc.map(discoverRow).join(''));
+  return { total, html, empty: total ? null : ['–', `No matches for “${state.query.trim()}”`, 'Try part of the role title or the company name.', false] };
+}
+function highlightSearch() {
+  const terms = searchTerms();
+  if (!terms.length) return;
+  const re = new RegExp(`(${terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'gi');
+  els.jobList.querySelectorAll('.job-title, .co-name, .sub-co > span:last-child').forEach((el) => {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const nodes = []; while (walker.nextNode()) nodes.push(walker.currentNode);
+    nodes.forEach((n) => {
+      if (!re.test(n.nodeValue)) return; re.lastIndex = 0;
+      const frag = document.createDocumentFragment();
+      n.nodeValue.split(re).forEach((part, i) => {
+        if (i % 2) { const m = document.createElement('mark'); m.textContent = part; frag.append(m); } else if (part) frag.append(part);
+      });
+      n.replaceWith(frag);
+    });
+  });
+}
+function setQuery(value) {
+  state.query = value;
+  els.searchInput.value = value;
+  els.searchClear.classList.toggle('hidden', !value);
+  render();
+}
+els.searchInput.addEventListener('input', () => setQuery(els.searchInput.value));
+els.searchClear.addEventListener('click', () => { setQuery(''); els.searchInput.focus(); });
+els.searchInput.addEventListener('keydown', (e) => { if (e.key === 'Escape' && state.query) { setQuery(''); e.stopPropagation(); } });
+document.addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); els.searchInput.focus(); els.searchInput.select(); }
+});
+
 function render() {
   renderTodos();
   if (state.prioDrag) return; // the list is rebuilt when the drag ends
   const b = buckets();
+  const searching = !!searchTerms().length;
   renderTiles(b);
 
   const view = state.tab === 'open' ? (state.filter || 'open')
@@ -1077,7 +1138,7 @@ function render() {
   els.historyCount.textContent = b.history.length;
   if (typeof syncTabFade === 'function') requestAnimationFrame(syncTabFade);
   document.querySelectorAll('.tab').forEach((t) => {
-    const on = t.dataset.tab === state.tab;
+    const on = t.dataset.tab === state.tab && !searching;
     t.classList.toggle('active', on);
     t.setAttribute('aria-selected', String(on));
   });
@@ -1093,14 +1154,18 @@ function render() {
   // List
   const renderers = { open: renderOpen, networking: renderNetworking, companies: renderCompanies, history: renderHistory, discover: renderDiscover };
   renderOwnerBar();
-  let { html = '', empty = null } = renderers[state.tab](b);
-  if (empty && state.ownerFilter !== 'all' && tabBase()?.length) {
+  let { html = '', empty = null, total = 0 } = searching ? renderSearch() : renderers[state.tab](b);
+  if (searching) els.ownerBar.classList.add('hidden');
+  els.searchCount.classList.toggle('hidden', !searching);
+  els.searchCount.textContent = searching ? plural(total, 'result') : '';
+  if (!searching && empty && state.ownerFilter !== 'all' && tabBase()?.length) {
     empty = ['–', state.ownerFilter === 'none' ? 'Nothing unassigned here' : `Nothing for ${state.ownerFilter} here`, 'Switch to Everyone to see the rest.', false];
   }
   const focusGrip = document.activeElement?.closest?.('[data-prio-grip]') && document.activeElement.closest('.job-row')?.dataset.id;
   els.jobList.innerHTML = html;
+  if (searching) highlightSearch();
   if (focusGrip) els.jobList.querySelector(`.job-row[data-id="${CSS.escape(focusGrip)}"] [data-prio-grip]`)?.focus({ preventScroll: true });
-  const showEmpty = !!empty && (state.tab === 'discover' ? state.discoverLoaded : state.tab === 'companies' ? state.companiesLoaded : state.loadedOnce);
+  const showEmpty = !!empty && (searching ? state.loadedOnce : state.tab === 'discover' ? state.discoverLoaded : state.tab === 'companies' ? state.companiesLoaded : state.loadedOnce);
   els.emptyState.classList.toggle('hidden', !showEmpty);
   if (empty) {
     els.emptyIcon.textContent = empty[0];
@@ -1122,12 +1187,13 @@ function setView(tab, filter = null) {
 }
 document.querySelectorAll('.stat').forEach((s) => s.addEventListener('click', () => {
   const v = s.dataset.view;
+  if (state.query) { state.query = ''; els.searchInput.value = ''; els.searchClear.classList.add('hidden'); }
   if (v === 'open') setView('open');
   else if (v === 'networking') setView('networking');
   else if (v === 'applied-today') setView('networking', 'applied-today');
   else setView('open', v);
 }));
-document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => setView(t.dataset.tab)));
+document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => { if (state.query) { state.query = ''; els.searchInput.value = ''; els.searchClear.classList.add('hidden'); } setView(t.dataset.tab); }));
 
 // On narrow screens the tabs scroll sideways; fade whichever edge has more tabs behind it.
 const tabsEl = document.querySelector('.tabs');

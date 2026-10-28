@@ -952,3 +952,18 @@ button.tchip:hover { border-color: var(--accent); color: var(--text); }
   .group-hint .hint-long { display: none; } .group-hint .hint-short { display: inline; }
 }
 @media (hover: none) { .pgrip { opacity: .6; } }
+
+/* ---------- Search ---------- */
+.search-row { position: relative; display: flex; align-items: center; gap: 8px; padding: 10px 14px 10px 20px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.search-ico { flex: none; width: 17px; height: 17px; color: var(--text-3); }
+.search-row input { flex: 1; min-width: 0; border: 0; background: transparent; box-shadow: none; padding: 6px 0; font-size: 14.5px; color: var(--text); outline: none; }
+.search-row input::-webkit-search-cancel-button { display: none; }
+.search-row:focus-within { background: var(--surface-hover); }
+.search-row:focus-within .search-ico { color: var(--accent-text); }
+.search-count { flex: none; font-size: 12.5px; font-weight: 600; color: var(--text-2); }
+.search-clear { flex: none; width: 24px; height: 24px; border: 0; border-radius: 50%; background: var(--surface-2); color: var(--text-2); font-size: 16px; line-height: 1; }
+.search-clear:hover { background: var(--border); color: var(--text); }
+.search-clear:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.search-row:focus-within .kbd-hint, .search-row:has(input:not(:placeholder-shown)) .kbd-hint { display: none; }
+mark { background: var(--amber-bg); color: inherit; border-radius: 3px; box-shadow: 0 0 0 1px var(--amber-line); }
+@media (max-width: 720px) { .search-row { padding: 8px 12px 8px 16px; } }

@@ -4,6 +4,13 @@ Changes to Job Sprint are recorded here. The initial Git snapshot is `v1.0.0`. E
 
 ## Unreleased
 
+### Search
+
+- A search box sits at the top of the list. Type a role, a company, a location (or a tracked contact's name) and every tab is searched at once. Several words narrow the results, so `ops lead faire` finds the BizOps Lead role at Faire.
+- Results appear as normal rows, grouped by where they live (To apply, Networking, History, Companies, Discover), with the matching text highlighted. Applied, Block, notes and the ⋯ menu all work from the results.
+- Case and punctuation are ignored. A result count shows next to the box. Press **Esc** or **×** to clear, **Ctrl/⌘ + K** to jump to the box. Clicking a tab or a dashboard tile leaves search.
+- Front-end only. No database change.
+
 ### Colour themes + theme picker
 
 - Four colour themes, each with a light and a dark version: **Sunset** (new default), **Lagoon**, **Grape**, and **Classic** (the previous look). The new dark modes are softer and more colourful than the old near-black.
