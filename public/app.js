@@ -59,7 +59,7 @@ const els = {};
 [
   'linkedinCopy', 'linkedinLabel', 'linkedinEdit', 'linkedinForm', 'linkedinInput', 'linkedinWho', 'linkedinErr', 'linkedinCancel',
   'userModal', 'switchUser', 'activeUser', 'activeUserAvatar', 'soundToggle', 'todoBtn', 'todoCount', 'todoBackdrop', 'todoDrawer', 'todoTitle', 'todoSub', 'closeTodo',
-  'todoSwitch', 'todoForm', 'todoInput', 'todoDraft', 'todoScroll', 'todoOpenList', 'todoDoneWrap', 'themeToggle', 'addForm', 'jobUrl', 'parseBtn',
+  'todoSwitch', 'todoForm', 'todoInput', 'todoDraft', 'todoScroll', 'todoOpenList', 'todoDoneWrap', 'themeToggle', 'themeMenu', 'paletteGrid', 'modeSeg', 'addForm', 'jobUrl', 'parseBtn',
   'addPanel', 'addPanelUrl', 'parseConfidence', 'parseStatus', 'dupWarning', 'previewForm',
   'titleInput', 'companyInput', 'locationInput', 'cancelPreview', 'saveJob',
   'statOpenValue', 'statOpenSub', 'statAppliedValue', 'statAppliedSub', 'statTodayValue', 'statTodaySub',
@@ -2422,28 +2422,66 @@ document.addEventListener('keydown', (e) => {
 document.addEventListener('visibilitychange', refreshIfDue);
 window.addEventListener('focus', refreshIfDue);
 
-/* ---------- Light / dark ---------- */
-// Follow the device setting until someone chooses a theme in this browser.
+/* ---------- Colour theme + mode ---------- */
+// Palette (data-palette) and mode (data-theme: light | dark | unset = follow the device) are saved per browser.
+const PALETTES = [
+  { id: 'sunset', name: 'Sunset', light: ['#FFF6EF', '#FFFFFF', '#D2431F'], dark: ['#241B30', '#2F2541', '#FF7A59'] },
+  { id: 'lagoon', name: 'Lagoon', light: ['#EEF6F6', '#FFFFFF', '#0A7A6E'], dark: ['#14272E', '#1B343C', '#2DD4BF'] },
+  { id: 'grape', name: 'Grape', light: ['#F5F3FF', '#FFFFFF', '#6D4AFF'], dark: ['#1D1934', '#272145', '#9479FF'] },
+  { id: 'classic', name: 'Classic', light: ['#F4F2EC', '#FDFCF9', '#B5562F'], dark: ['#0E1015', '#171A22', '#C8643F'] },
+];
 const darkQuery = window.matchMedia('(prefers-color-scheme: dark)');
-function currentTheme() {
-  const saved = document.documentElement.getAttribute('data-theme');
-  return saved === 'light' || saved === 'dark' ? saved : (darkQuery.matches ? 'dark' : 'light');
+const rootEl = document.documentElement;
+function currentPalette() { return rootEl.getAttribute('data-palette') || 'sunset'; }
+function currentMode() { const m = rootEl.getAttribute('data-theme'); return m === 'light' || m === 'dark' ? m : 'auto'; }
+function currentTheme() { const m = currentMode(); return m === 'auto' ? (darkQuery.matches ? 'dark' : 'light') : m; }
+function paletteCard(p) {
+  const half = (c) => `<span class="pv" style="background:${c[0]}"><i style="background:${c[1]}"></i><b style="background:${c[2]}"></b></span>`;
+  return `<button type="button" role="radio" class="palette-card" data-palette="${p.id}"><span class="pv-pair">${half(p.light)}${half(p.dark)}</span><span class="pv-name">${p.name}</span><span class="pv-check" aria-hidden="true">✓</span></button>`;
 }
+els.paletteGrid.innerHTML = PALETTES.map(paletteCard).join('');
 function syncTheme() {
   const dark = currentTheme() === 'dark';
-  const label = `Switch to ${dark ? 'light' : 'dark'} mode`;
+  const palette = currentPalette();
+  const mode = currentMode();
+  const name = (PALETTES.find((p) => p.id === palette) || PALETTES[0]).name;
+  const label = `Theme: ${name}, ${mode === 'auto' ? 'auto' : mode}`;
   els.themeToggle.setAttribute('aria-label', label);
   els.themeToggle.setAttribute('title', label);
-  els.themeToggle.setAttribute('aria-pressed', String(dark));
-  const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
+  els.paletteGrid.querySelectorAll('.palette-card').forEach((b) => {
+    const on = b.dataset.palette === palette;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-checked', String(on));
+  });
+  els.modeSeg.querySelectorAll('button').forEach((b) => {
+    const on = b.dataset.mode === mode;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-checked', String(on));
+  });
+  const bg = getComputedStyle(rootEl).getPropertyValue('--bg').trim();
   document.querySelectorAll('meta[name="theme-color"]').forEach((meta) => meta.setAttribute('content', bg));
+  rootEl.dataset.resolved = dark ? 'dark' : 'light';
 }
-els.themeToggle.addEventListener('click', () => {
-  const next = currentTheme() === 'dark' ? 'light' : 'dark';
-  document.documentElement.setAttribute('data-theme', next);
-  store.set('jobSprintTheme', next);
+function setPalette(id) {
+  if (!PALETTES.some((p) => p.id === id)) return;
+  rootEl.setAttribute('data-palette', id);
+  store.set('jobSprintPalette', id);
   syncTheme();
-});
+}
+function setMode(mode) {
+  if (mode === 'auto') { rootEl.removeAttribute('data-theme'); store.set('jobSprintTheme', 'auto'); }
+  else { rootEl.setAttribute('data-theme', mode); store.set('jobSprintTheme', mode); }
+  syncTheme();
+}
+function openThemeMenu() { els.themeMenu.classList.remove('hidden'); els.themeToggle.setAttribute('aria-expanded', 'true'); }
+function closeThemeMenu() { els.themeMenu.classList.add('hidden'); els.themeToggle.setAttribute('aria-expanded', 'false'); }
+els.themeToggle.addEventListener('click', () => (els.themeMenu.classList.contains('hidden') ? openThemeMenu() : closeThemeMenu()));
+els.paletteGrid.addEventListener('click', (e) => { const b = e.target.closest('.palette-card'); if (b) setPalette(b.dataset.palette); });
+els.modeSeg.addEventListener('click', (e) => { const b = e.target.closest('button[data-mode]'); if (b) setMode(b.dataset.mode); });
+document.addEventListener('mousedown', (e) => { if (!els.themeMenu.classList.contains('hidden') && !e.target.closest('.theme-wrap')) closeThemeMenu(); });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !els.themeMenu.classList.contains('hidden')) { closeThemeMenu(); els.themeToggle.focus(); e.stopPropagation(); }
+}, true);
 if (darkQuery.addEventListener) darkQuery.addEventListener('change', syncTheme);
 syncTheme();
 

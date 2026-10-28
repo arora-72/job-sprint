@@ -4,6 +4,13 @@ Changes to Job Sprint are recorded here. The initial Git snapshot is `v1.0.0`. E
 
 ## Unreleased
 
+### Colour themes + theme picker
+
+- Four colour themes, each with a light and a dark version: **Sunset** (new default), **Lagoon**, **Grape**, and **Classic** (the previous look). The new dark modes are softer and more colourful than the old near-black.
+- The header theme button opens a picker: choose a colour theme (cards preview light and dark), and a mode: **Light**, **Dark** or **Auto** (follows the device). Each browser remembers its own choice, so you and Indresh can use different themes.
+- Text and button colours pass a 4.5:1 contrast check in every theme and mode.
+- Front-end only (`public/themes.css`). No database change.
+
 ### Moved off Netlify: GitHub Pages + Supabase Edge Functions
 
 - The site now lives at **https://arora-72.github.io/job-sprint/** and publishes automatically on every push to `main`. No deploy command, no Netlify credits.
