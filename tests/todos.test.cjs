@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 
 process.env.SUPABASE_URL = 'https://example.supabase.co';
 process.env.SUPABASE_SECRET_KEY = 'test-only';
-const { handler, isDay } = require('../netlify/functions/todos');
+const { handler, isDay } = require('../supabase/functions/todos/index.js');
 
 const ID = '6f1c1a8e-8d55-4c0b-9d0a-3f0c2b9a7e11';
 const JOB = '0b3a6a3e-1111-4c0b-9d0a-3f0c2b9a7e22';

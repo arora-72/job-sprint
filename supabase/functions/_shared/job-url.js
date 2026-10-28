@@ -1,4 +1,4 @@
-const { createHash } = require('node:crypto');
+import { createHash } from 'node:crypto';
 
 const TRACKING_KEYS = new Set(['ref', 'refid', 'trackingid', 'trk', 'trkinfo', 'src', 'source', 'gh_src', 'lever-source', 'lever-origin', 'li_fat_id', 'gclid', 'fbclid', 'origin', 'from', 'referer', 'referrer']);
 
@@ -16,4 +16,4 @@ function sourceKey(value) {
   return createHash('sha256').update(normalizeJobUrl(value)).digest('hex');
 }
 
-module.exports = { normalizeJobUrl, sourceKey };
+export { normalizeJobUrl, sourceKey };

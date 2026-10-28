@@ -1,6 +1,6 @@
 const json = (statusCode, body) => ({ statusCode, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }, body: JSON.stringify(body) });
-const dns = require('node:dns').promises;
-const net = require('node:net');
+import { promises as dns } from 'node:dns';
+import net from 'node:net';
 
 function isPublicAddress(address) {
   const version = net.isIP(address);
@@ -99,7 +99,7 @@ function inferCompanyAndTitle(rawTitle) {
   return { title: rawTitle, company: '' };
 }
 
-exports.handler = async (event) => {
+export const handler = async (event) => {
   if (event.httpMethod !== 'POST') return json(405, { error: 'Method not allowed.' });
   try {
     const { url } = JSON.parse(event.body || '{}');
@@ -146,3 +146,7 @@ exports.handler = async (event) => {
     return json(422, { error: err.message || 'Could not parse this job page.' });
   }
 };
+
+// Runs as a Supabase Edge Function; does nothing when imported by the tests.
+import { serve } from '../_shared/serve.js';
+serve(handler);

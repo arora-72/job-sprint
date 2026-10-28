@@ -1,6 +1,5 @@
-const crypto = require('crypto');
-const { supabase } = require('./_supabase');
-const { normalizeJobUrl, sourceKey } = require('./_job-url');
+import { env, supabase } from '../_shared/supabase.js';
+import { normalizeJobUrl, sourceKey } from '../_shared/job-url.js';
 
 const json = (statusCode, body) => ({
   statusCode,
@@ -120,7 +119,7 @@ function cleanRole(input) {
 }
 
 async function ingest(event) {
-  const expected = process.env.DISCOVER_INGEST_TOKEN;
+  const expected = env('DISCOVER_INGEST_TOKEN');
   const authorization = event.headers?.authorization || event.headers?.Authorization;
   if (!expected || authorization !== `Bearer ${expected}`) return json(401, { error: 'Import is not authorized.' });
   const data = JSON.parse(event.body || '{}');
@@ -145,7 +144,7 @@ async function ingest(event) {
   return json(200, { created, updated });
 }
 
-exports.handler = async (event) => {
+export const handler = async (event) => {
   try {
     if (event.httpMethod === 'GET') return json(200, { roles: await getQueue() });
     if (event.httpMethod === 'PUT') return await ingest(event);
@@ -167,3 +166,7 @@ exports.handler = async (event) => {
     return json(error instanceof SyntaxError ? 400 : 500, { error: error.message || 'Server error.' });
   }
 };
+
+// Runs as a Supabase Edge Function; does nothing when imported by the tests.
+import { serve } from '../_shared/serve.js';
+serve(handler);

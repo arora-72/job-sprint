@@ -4,10 +4,11 @@ A shared, mobile-friendly job pipeline for Garima and Indresh.
 
 ## Current deployment
 
-- The public site is hosted on Netlify, with its database in Supabase. Keep project links and account details in your password manager or private notes.
-- Netlify environment variables: `SUPABASE_URL` and `SUPABASE_SECRET_KEY` (the secret value is stored in Netlify, not in this source archive).
-- Discover import variable: `DISCOVER_INGEST_TOKEN`, stored as a Netlify secret for production functions.
-- Keep the Supabase database password in your password manager. It is not included here.
+- **Site:** https://arora-72.github.io/job-sprint/ (GitHub Pages). Every push to `main` that touches `public/` publishes automatically (`.github/workflows/pages.yml`).
+- **Server code:** Supabase Edge Functions in `supabase/functions/` (`jobs`, `companies`, `discover`, `todos`, `parse-job`), served at `https://tuggvixzrgbqagqrrkey.supabase.co/functions/v1/<name>`. They use the project's own server key, which Supabase provides to functions automatically; no key is stored in this repository.
+- **Database:** the same Supabase project. The browser never reads tables directly; it only calls the functions.
+- The publishable key in `public/app.js` is meant to be public. It identifies the project and gives no table access.
+- The old Netlify site (`jobsprint-shared-v1.netlify.app`) stays on its last build and is no longer updated.
 
 This site is public and has no login. The name chooser records who an action is
 attributed to; it does not verify that person's identity. Anyone with the URL
@@ -34,7 +35,7 @@ can view and change the shared jobs.
 - Matches already in Pipeline or History are hidden by normalized job URL. Repeated imports update role details without resetting an existing Added or Dismissed decision.
 - Initial match data is kept outside this repository because it contains candidate-specific fit notes. New matches can be imported without committing personal data.
 - The new table is `public.discover_jobs` in the **same Supabase project**. Its migration is `supabase/discover.sql`.
-- The protected `PUT /.netlify/functions/discover` endpoint accepts batches of 1–30 S/A roles with a `Bearer` token from `DISCOVER_INGEST_TOKEN`. The key stays on the server. Regular visitors can only review, add, or dismiss matches through the public site.
+- The protected `PUT /functions/v1/discover` endpoint accepts batches of 1–30 S/A roles with a `Bearer` token from the `DISCOVER_INGEST_TOKEN` function secret (not set at the moment, so the endpoint refuses imports). New roles are imported through the Supabase SQL Editor instead. Regular visitors can only review, add, or dismiss matches through the public site.
 - The watch chats do not expose a machine-readable tracker link in their messages. Until the pipeline source is connected, new watch results need to be imported; the existing seven matches are live now.
 - To prepare another import through Supabase SQL Editor, save a local JSON array of matches, then run `node scripts/prepare-discover-import.cjs input.json output.sql`. Keep the input and generated SQL outside this repository. The generated upsert preserves Added and Dismissed status.
 
@@ -51,21 +52,15 @@ From **Project Settings → API**, copy:
 
 Keep the secret key private. It is only used by server-side functions.
 
-### 2. Deploy this folder to Netlify
+### 2. Deploy the server functions
 
-Create a free Netlify site from this folder/repository. The public files are
-in `public/`; Netlify Functions are in `netlify/functions/`.
+Deploy each folder in `supabase/functions/` as an Edge Function with JWT verification turned off (the functions are public, like the site). With the Supabase CLI: `supabase functions deploy jobs --no-verify-jwt`, and the same for `companies`, `discover`, `todos` and `parse-job`. The protected Discover import (`PUT /discover`) only works if you also set a `DISCOVER_INGEST_TOKEN` secret; otherwise it refuses every import.
 
-In **Site configuration → Environment variables**, add:
-- `SUPABASE_URL`
-- `SUPABASE_SECRET_KEY`
-- `DISCOVER_INGEST_TOKEN` (a randomly generated value marked **Contains secret values**, needed only for the protected import endpoint)
+### 3. Publish the site
 
-Deploy. Netlify will give you one public URL to share.
+In the GitHub repository, open **Settings → Pages** and set the source to **GitHub Actions**. The workflow publishes `public/` on every push to `main`. If you fork this to another account, update `ALLOWED_ORIGINS` in `supabase/functions/_shared/serve.js` and the project URL and publishable key at the top of the API section in `public/app.js`.
 
-The current site was deployed with the Netlify CLI and is not connected to a Git repository. After linking this folder to the existing Netlify project, publish updates with `netlify deploy --prod --dir=public --functions=netlify/functions --context production`.
-
-### 3. Use it
+### 4. Use it
 
 Open the URL → choose **Garima** or **Indresh** → paste a job link → save.
 
@@ -73,7 +68,7 @@ Open the URL → choose **Garima** or **Indresh** → paste a job link → save.
 
 The first Git version is the current working app (`v1.0.0`). Earlier V1, dashboard, and Discover changes are summarized in [CHANGELOG.md](CHANGELOG.md); they were built before Git tracking began and therefore do not have individual historical commits.
 
-For each future change, update `CHANGELOG.md`, run `node --test tests/*.test.cjs`, then commit and push the code. Give each release a version in `package.json` and a matching Git tag (for example, `v1.1.0`). The repository is separate from the live Netlify site until Git-based deployment is connected there; pushing a commit alone does not change the public app.
+For each future change, update `CHANGELOG.md`, run `npm test`, then commit and push. Pushing to `main` publishes the site; server changes also need the changed functions redeployed. To try the site locally, run `npm run serve` and open http://localhost:8080 (it talks to the live functions).
 
 ## Notes about parsing
 
@@ -81,4 +76,4 @@ The parser first looks for standard `JobPosting` JSON-LD data, which many career
 
 ## Security note
 
-V2 is designed for two-person personal use. The Supabase secret key stays server-side and the database is not directly readable from the browser. The public site itself has no password/login yet. The name chooser is attribution, not authentication. If you want stronger access control later, add authentication or a site-level password.
+V2 is designed for two-person personal use. The Supabase secret key stays server-side and the database is not directly readable from the browser. The functions only answer browsers on the GitHub Pages site (CORS), and the page sets a Content-Security-Policy. The public site itself has no password/login yet. The name chooser is attribution, not authentication. If you want stronger access control later, add authentication or a site-level password.

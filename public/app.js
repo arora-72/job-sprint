@@ -225,10 +225,14 @@ function showToast(message, { error = false, undo = null } = {}) {
 function hideToast() { els.toast.classList.add('hidden'); els.toastUndo.onclick = null; }
 
 /* ---------- API ---------- */
+// Server code runs as Supabase Edge Functions. The publishable key is meant to be public:
+// it only identifies the project. The secret key stays on the server.
+const API_BASE = window.JOB_SPRINT_API_BASE || 'https://tuggvixzrgbqagqrrkey.supabase.co/functions/v1';
+const API_KEY = 'sb_publishable_Pw46xIcwEZVThExD1uqqew_p2DUc6TT';
 async function api(path, options = {}) {
-  const res = await fetch(`/.netlify/functions/${path}`, {
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+  const res = await fetch(`${API_BASE}/${path}`, {
     ...options,
+    headers: { 'Content-Type': 'application/json', apikey: API_KEY, ...(options.headers || {}) },
   });
   const payload = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(payload.error || 'Something went wrong');

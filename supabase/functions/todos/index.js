@@ -1,4 +1,4 @@
-const { supabase } = require('./_supabase');
+import { supabase } from '../_shared/supabase.js';
 
 const USERS = ['Garima', 'Indresh'];
 const LINK_KINDS = ['job', 'company'];
@@ -103,7 +103,7 @@ async function handlePatch(body) {
   return bad('Unknown action.');
 }
 
-exports.handler = async (event) => {
+export const handler = async (event) => {
   try {
     if (event.httpMethod === 'GET') {
       const since = new Date(Date.now() - DONE_KEEP_DAYS * 86400000).toISOString();
@@ -153,5 +153,9 @@ exports.handler = async (event) => {
   }
 };
 
-exports.isDay = isDay;
-exports.cleanRestoredTodo = cleanRestoredTodo;
+export { isDay };
+export { cleanRestoredTodo };
+
+// Runs as a Supabase Edge Function; does nothing when imported by the tests.
+import { serve } from '../_shared/serve.js';
+serve(handler);

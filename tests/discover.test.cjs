@@ -4,8 +4,8 @@ const assert = require('node:assert/strict');
 process.env.SUPABASE_URL = 'https://example.supabase.co';
 process.env.SUPABASE_SECRET_KEY = 'test-only';
 process.env.DISCOVER_INGEST_TOKEN = 'test-import-token';
-const { handler } = require('../netlify/functions/discover');
-const { sourceKey } = require('../netlify/functions/_job-url');
+const { handler } = require('../supabase/functions/discover/index.js');
+const { sourceKey } = require('../supabase/functions/_shared/job-url.js');
 
 const role = {
   id: 'b6abf7c3-28b8-46b6-84f4-223e3cad44f8',

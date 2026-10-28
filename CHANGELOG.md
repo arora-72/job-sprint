@@ -4,6 +4,13 @@ Changes to Job Sprint are recorded here. The initial Git snapshot is `v1.0.0`. E
 
 ## Unreleased
 
+### Moved off Netlify: GitHub Pages + Supabase Edge Functions
+
+- The site now lives at **https://arora-72.github.io/job-sprint/** and publishes automatically on every push to `main`. No deploy command, no Netlify credits.
+- The server code moved from Netlify Functions to Supabase Edge Functions (`supabase/functions/`). Same behaviour, same database, same checks. The functions only answer the GitHub Pages site.
+- The page sets its own security rules (Content-Security-Policy, referrer policy), since GitHub Pages can't send headers.
+- Removed the Netlify config and the Netlify CLI dependency. The old Netlify site stays up on its last build.
+
 ### Priority order on To apply
 
 - To apply has a new switch: **Priority | Date added**. Priority is the default, and each browser remembers the last choice. Date added is the old view, unchanged.

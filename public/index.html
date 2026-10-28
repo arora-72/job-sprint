@@ -6,6 +6,9 @@
   <meta name="color-scheme" content="light dark" />
   <meta name="theme-color" content="#F4F2EC" media="(prefers-color-scheme: light)" />
   <meta name="theme-color" content="#0E1015" media="(prefers-color-scheme: dark)" />
+  <!-- GitHub Pages cannot send security headers, so the page sets its own rules. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-r1haou8UqTp7u0M4ycE7zYoQs3Kaej93LM19C9uoDzo='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://tuggvixzrgbqagqrrkey.supabase.co http://localhost:8787; base-uri 'self'; form-action 'self'; object-src 'none'" />
+  <meta name="referrer" content="strict-origin-when-cross-origin" />
   <title>Job Sprint</title>
   <script>
     // Apply a saved theme before first paint so there is no flash.
@@ -14,7 +17,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <!-- Who is using the app (remembered in this browser) -->
@@ -300,6 +303,6 @@
     <span id="toastText"></span>
     <button id="toastUndo" class="toast-undo hidden">Undo</button>
   </div>
-  <script src="/app.js" defer></script>
+  <script src="app.js" defer></script>
 </body>
 </html>

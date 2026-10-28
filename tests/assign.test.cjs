@@ -3,8 +3,8 @@ const assert = require('node:assert/strict');
 
 process.env.SUPABASE_URL = 'https://example.supabase.co';
 process.env.SUPABASE_SECRET_KEY = 'test-only';
-const jobs = require('../netlify/functions/jobs').handler;
-const companies = require('../netlify/functions/companies').handler;
+const jobs = require('../supabase/functions/jobs/index.js').handler;
+const companies = require('../supabase/functions/companies/index.js').handler;
 
 const ID = '6f1c1a8e-8d55-4c0b-9d0a-3f0c2b9a7e11';
 const reply = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } });

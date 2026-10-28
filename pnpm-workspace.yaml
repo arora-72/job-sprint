@@ -1,4 +1,0 @@
-allowBuilds:
-  esbuild: set this to true or false
-  netlify-cli: set this to true or false
-  unix-dgram: set this to true or false

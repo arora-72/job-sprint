@@ -1,5 +1,4 @@
-const crypto = require('crypto');
-const { supabase } = require('./_supabase');
+import { supabase } from '../_shared/supabase.js';
 
 const USERS = ['Garima', 'Indresh'];
 const STAGES = ['watching', 'reached_out', 'in_conversation', 'referral'];
@@ -192,7 +191,7 @@ async function handlePatch(body) {
   return bad('Unknown action.');
 }
 
-exports.handler = async (event) => {
+export const handler = async (event) => {
   try {
     if (event.httpMethod === 'GET') {
       const companies = await supabase('companies?select=*&order=added_at.desc');
@@ -260,5 +259,9 @@ exports.handler = async (event) => {
   }
 };
 
-exports.STAGES = STAGES;
-exports.PERSON_STATUSES = PERSON_STATUSES;
+export { STAGES };
+export { PERSON_STATUSES };
+
+// Runs as a Supabase Edge Function; does nothing when imported by the tests.
+import { serve } from '../_shared/serve.js';
+serve(handler);

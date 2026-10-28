@@ -4,10 +4,7 @@
   "private": true,
   "description": "Shared job application pipeline for Garima and Indresh",
   "scripts": {
-    "dev": "netlify dev",
-    "test": "node --test tests/*.test.cjs"
-  },
-  "devDependencies": {
-    "netlify-cli": "^27.14.2"
+    "test": "node --test tests/*.test.cjs",
+    "serve": "python3 -m http.server 8080 --directory public"
   }
 }
