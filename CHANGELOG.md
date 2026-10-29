@@ -4,6 +4,24 @@ Changes to Job Sprint are recorded here. The initial Git snapshot is `v1.0.0`. E
 
 ## Unreleased
 
+### Analytics tab + outcomes
+
+- New **Analytics** tab. Goal: **5 applications a day each**, Monday to Friday (weekends count as a bonus).
+  - **Today**: a goal ring per person ("3/5 · 2 to go"). Hitting 5 rings a confetti moment.
+  - **This week**: team total vs the weekly goal, change vs the same point last week, and goal days per person.
+  - **Streak**: days in a row each person applied, with personal best. Weekends never break it.
+  - **Milestones**: total applications together, progress to the next milestone (10, 25, 50, 100…), best day and best week. Crossing a milestone celebrates.
+  - **Today & yesterday**: who applied where, as company chips. Click one to jump to that job.
+  - **Last 30 days**: a bar chart per person with the goal line; solid bars hit the goal, weekends shaded. Hover any bar for the day's numbers.
+  - **Consistency**: a 16-week calendar heatmap for the team, plus which weekday you apply most.
+  - **Pipeline health**: added vs cleared in the last 4 weeks, open jobs by age, jobs on hold, and how long To apply takes to clear at your pace.
+  - **Networking follow-through**: share of applications networked and how many are waiting 5+ days, with a button to go nudge them.
+  - **Funnel**: Added → Applied → Networked → Interview → Offer, with conversion at each step.
+  - **Which resume works**: interviews per resume sent (rates show after 5 sends).
+  - **What you're applying to**: applications by role type, and the top reasons jobs got blocked.
+- **Outcomes**: on Networking and History rows, ⋯ → **Set outcome**: Got an interview, Got an offer, Rejected, I withdrew. A badge shows on the row (click it to change); interviews and offers celebrate. "Rejected after interview" is tracked. Undo restores the exact previous outcome.
+- Database: outcome columns on jobs (`supabase/outcomes.sql`), with a backup of jobs first (`backup.jobs_before_outcomes`).
+
 ### PDFs: files on jobs + Resumes tab
 
 - New **Resumes** tab (after Companies) for your standard resumes. **+ Upload resume** (or drop a PDF on the tab), name it, and pick the role it's for: Chief of Staff, Operations Management, BizOps, Strategy & Operations, Product Ops, or your own. Resumes are grouped by role. Star one per role as the **go-to**. Open, Download, Rename or replace, and Delete (with Undo). Each resume shows how many jobs it was sent for.

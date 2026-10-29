@@ -578,6 +578,7 @@ function networkRow(job) {
         <div class="job-text">
           ${titleLink(job)}
           <div class="job-sub">${subLine(job)}${companyBadge(job)}</div>
+          ${outcomeBadge(job)}
           ${notePreview(job)}
         </div>
       </div>
@@ -612,6 +613,7 @@ function historyRow(job) {
         <div class="job-text">
           ${titleLink(job)}
           <div class="job-sub">${subLine(job)}</div>
+          ${outcomeBadge(job)}
           ${notePreview(job)}
         </div>
       </div>
@@ -1086,7 +1088,7 @@ function renderDiscover() {
 
 // Everything on the current tab before the owner filter, so the filter bar can show honest counts.
 function tabBase() {
-  if (state.tab === 'discover' || state.tab === 'resumes') return null;
+  if (state.tab === 'discover' || state.tab === 'resumes' || state.tab === 'analytics') return null;
   if (state.tab === 'companies') return state.companies;
   return state.jobs.filter((j) => stageOf(j) === state.tab);
 }
@@ -1218,7 +1220,7 @@ function render() {
   els.syncText.classList.toggle('sync-error', state.refreshError);
 
   // List
-  const renderers = { open: renderOpen, networking: renderNetworking, companies: renderCompanies, resumes: renderResumes, history: renderHistory, discover: renderDiscover };
+  const renderers = { open: renderOpen, networking: renderNetworking, companies: renderCompanies, resumes: renderResumes, history: renderHistory, analytics: renderAnalytics, discover: renderDiscover };
   renderOwnerBar();
   let { html = '', empty = null, total = 0 } = searching ? renderSearch() : renderers[state.tab](b);
   if (searching) els.ownerBar.classList.add('hidden');
@@ -1516,6 +1518,10 @@ els.jobList.addEventListener('click', (e) => {
   if (!job) return;
   const action = btn.dataset.action;
   if (action === 'notes') { openNotes(id); return; }
+  if (action === 'outcome-menu') {
+    if (els.rowMenu.dataset.id === id && !els.rowMenu.classList.contains('hidden')) closeRowMenu(); else openOutcomeMenu(id, btn);
+    return;
+  }
   if (action === 'hold-menu') {
     if (els.rowMenu.dataset.id === id && !els.rowMenu.classList.contains('hidden')) closeRowMenu(); else openHoldMenu(id, btn);
     return;
@@ -1527,7 +1533,13 @@ els.jobList.addEventListener('click', (e) => {
     const today = buckets().appliedToday.length;
     playBell(today in CHEER);
     celebrate(btn, today in CHEER);
-    showToast(CHEER[today] ? `${CHEER[today]} Moved to Networking: ${jobLabel(job)}` : `Applied · moved to Networking: ${jobLabel(job)}`, { undo: () => setStatus(id, 'pipeline') });
+    const total = state.jobs.filter((j) => j.applied_at).length;
+    const mine = (buckets().appliedToday || []).filter((j) => j.applied_by === state.user).length;
+    const msg = MILESTONES.includes(total) ? `🎉 Team milestone: ${total} applications!`
+      : mine === DAILY_GOAL ? `🎯 Daily goal hit: ${DAILY_GOAL} today.`
+        : CHEER[today] || 'Applied ·';
+    if (MILESTONES.includes(total) || mine === DAILY_GOAL) celebrate(btn, true);
+    showToast(`${msg} Moved to Networking: ${jobLabel(job)}`, { undo: () => setStatus(id, 'pipeline') });
   } else if (action === 'block') {
     openBlockModal(job);
   } else if (action === 'done') {
@@ -1690,7 +1702,10 @@ function openRowMenu(id, kind, anchor, point) {
       ? '<button role="menuitem" class="menu-item" data-menu="hold-pick">Change hold reason…</button><button role="menuitem" class="menu-item" data-menu="unhold">Resume (take off hold)</button><button role="menuitem" class="menu-item" data-menu="block">Block…</button><div class="menu-sep"></div>'
       : '<button role="menuitem" class="menu-item" data-menu="hold-pick">Put on hold…</button><div class="menu-sep"></div>')
     : '';
-  showRowMenu(id, kind, `${prio}${hold}${items}<button role="menuitem" class="menu-item" data-menu="todo">Add to-do…</button><button role="menuitem" class="menu-item danger" data-menu="delete">Delete…</button>`, anchor, point);
+  const oc = kind === 'job' && stageOf(entry) !== 'open' && entry.status === 'applied'
+    ? `<button role="menuitem" class="menu-item" data-menu="outcome-pick">${entry.outcome ? 'Change outcome…' : 'Set outcome… (interview, offer)'}</button><div class="menu-sep"></div>`
+    : '';
+  showRowMenu(id, kind, `${prio}${hold}${oc}${items}<button role="menuitem" class="menu-item" data-menu="todo">Add to-do…</button><button role="menuitem" class="menu-item danger" data-menu="delete">Delete…</button>`, anchor, point);
 }
 function openHoldMenu(id, anchor, point) {
   const job = entryOf(id, 'job');
@@ -1778,6 +1793,8 @@ els.rowMenu.addEventListener('click', async (e) => {
     return;
   }
   if (item.dataset.menu === 'assign') { closeRowMenu(); assignOwner(id, kind, item.dataset.owner || null); return; }
+  if (item.dataset.menu === 'outcome-pick') { const r = els.rowMenu.getBoundingClientRect(); openOutcomeMenu(id, null, { x: r.left, y: r.top }); return; }
+  if (item.dataset.menu === 'outcome') { closeRowMenu(); if (!state.user) { chooseUser(); return; } setOutcome(id, item.dataset.outcome || null); return; }
   if (item.dataset.menu === 'hold-pick') { const r = els.rowMenu.getBoundingClientRect(); openHoldMenu(id, null, { x: r.left, y: r.top }); return; }
   if (item.dataset.menu === 'hold') { closeRowMenu(); if (!state.user) { chooseUser(); return; } if (entry.hold_reason !== item.dataset.reason || !isHeld(entry)) putOnHold(id, item.dataset.reason); return; }
   if (item.dataset.menu === 'unhold') { closeRowMenu(); if (!state.user) { chooseUser(); return; } resumeJob(id); return; }
@@ -1802,7 +1819,7 @@ els.rowMenu.addEventListener('keydown', (e) => {
   items[(i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length].focus();
 });
 document.addEventListener('mousedown', (e) => {
-  if (!els.rowMenu.classList.contains('hidden') && !e.target.closest('#rowMenu, .menu-btn, .own, .tmenu, .hold-pill, [data-doc-menu]')) closeRowMenu();
+  if (!els.rowMenu.classList.contains('hidden') && !e.target.closest('#rowMenu, .menu-btn, .own, .tmenu, .hold-pill, .oc-badge, [data-doc-menu]')) closeRowMenu();
 });
 window.addEventListener('resize', closeRowMenu);
 window.addEventListener('scroll', closeRowMenu, true);
@@ -3109,6 +3126,352 @@ function onDocClick(e) {
   return false;
 }
 els.filesList.addEventListener('click', onDocClick);
+
+
+/* ---------- Outcomes after applying ---------- */
+const OUTCOMES = {
+  interview: { label: 'Interview', menu: 'Got an interview', icon: '🎤', tone: 'good' },
+  offer: { label: 'Offer', menu: 'Got an offer 🎉', icon: '🎉', tone: 'best' },
+  rejected: { label: 'Rejected', menu: 'Rejected', icon: '✕', tone: 'bad' },
+  withdrawn: { label: 'Withdrew', menu: 'I withdrew', icon: '↩', tone: 'neutral' },
+};
+function outcomeBadge(job) {
+  const o = OUTCOMES[job.outcome];
+  if (!o) return '';
+  const after = job.outcome === 'rejected' && job.interview_at ? ' after interview' : '';
+  return `<button type="button" class="oc-badge oc-${o.tone}" data-action="outcome-menu" title="Set ${relDate(job.outcome_at)}${job.outcome_by ? ` by ${escapeHtml(job.outcome_by)}` : ''}. Click to change.">${o.icon} ${o.label}${after}<span>· ${relDate(job.outcome_at)}</span></button>`;
+}
+function openOutcomeMenu(id, anchor, point) {
+  const job = entryOf(id, 'job');
+  if (!job) return;
+  showRowMenu(id, 'job', `<div class="menu-title">What happened?</div>${Object.entries(OUTCOMES).map(([k, o]) => `<button role="menuitem" class="menu-item${job.outcome === k ? ' current' : ''}" data-menu="outcome" data-outcome="${k}">${o.menu}${job.outcome === k ? '<span class="menu-check" aria-hidden="true">✓</span>' : ''}</button>`).join('')}${job.outcome ? '<div class="menu-sep"></div><button role="menuitem" class="menu-item" data-menu="outcome" data-outcome="">Clear outcome</button>' : ''}`, anchor, point);
+}
+function setOutcome(id, outcome, restore = null) {
+  const job = entryOf(id, 'job');
+  if (!job || (job.outcome || null) === outcome && !restore) return;
+  const prev = { outcome: job.outcome || null, outcome_at: job.outcome_at || null, outcome_by: job.outcome_by || null, interview_at: job.interview_at || null };
+  const now = new Date().toISOString();
+  const local = restore ? { outcome, ...restore }
+    : outcome === null ? { outcome: null, outcome_at: null, outcome_by: null }
+      : { outcome, outcome_at: now, outcome_by: state.user, interview_at: (outcome === 'interview' || outcome === 'offer') && !job.interview_at ? now : job.interview_at || null };
+  mutate(id, { ...local, updated_at: now }, { action: 'outcome', outcome, ...(restore ? { restore } : {}) });
+  if (restore) return;
+  if (outcome === 'offer' || outcome === 'interview') {
+    const row = els.jobList.querySelector(`.job-row[data-id="${CSS.escape(id)}"]`);
+    if (row) celebrate(row, outcome === 'offer');
+    playBell(outcome === 'offer');
+  }
+  const words = outcome ? `${OUTCOMES[outcome].icon} ${OUTCOMES[outcome].label}` : 'Outcome cleared';
+  showToast(`${words}: ${jobLabel(job)}`, { undo: () => setOutcome(id, prev.outcome, { outcome_at: prev.outcome_at, outcome_by: prev.outcome_by, interview_at: prev.interview_at }) });
+}
+
+/* ---------- Analytics ---------- */
+// Everything here is computed in the browser from the jobs already loaded. Goal: 5 a day each,
+// Monday to Friday. Weekend applications count as a bonus and never break a streak.
+const DAILY_GOAL = 5;
+const WEEK_GOAL = DAILY_GOAL * 5;
+const MILESTONES = [10, 25, 50, 75, 100, 150, 200, 250, 300, 400, 500, 750, 1000];
+const pad2 = (n) => String(n).padStart(2, '0');
+function dayKey(d) { const x = new Date(d); return `${x.getFullYear()}-${pad2(x.getMonth() + 1)}-${pad2(x.getDate())}`; }
+function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
+function isWeekend(d) { const g = new Date(d).getDay(); return g === 0 || g === 6; }
+function mondayOf(d) { const x = startOfDay(d); return addDays(x, -((x.getDay() + 6) % 7)); }
+const fmtDay = (d, opts = { weekday: 'short', month: 'short', day: 'numeric' }) => new Intl.DateTimeFormat(undefined, opts).format(d);
+
+function analyticsData() {
+  const applied = state.jobs.filter((j) => j.applied_at && USERS.includes(j.applied_by));
+  const counts = { team: new Map() };
+  USERS.forEach((u) => { counts[u] = new Map(); });
+  applied.forEach((j) => {
+    const k = dayKey(j.applied_at);
+    counts[j.applied_by].set(k, (counts[j.applied_by].get(k) || 0) + 1);
+    counts.team.set(k, (counts.team.get(k) || 0) + 1);
+  });
+  const on = (who, d) => counts[who].get(dayKey(d)) || 0;
+  const today = startOfToday();
+  // Streak: days in a row with at least one application. Weekends with none are skipped, and
+  // today doesn't break it until it's over.
+  const streak = (who) => {
+    let n = 0;
+    for (let i = 0, d = today; i < 400; i += 1, d = addDays(d, -1)) {
+      const c = on(who, d);
+      if (c > 0) n += 1;
+      else if (i === 0 || isWeekend(d)) continue;
+      else break;
+    }
+    return n;
+  };
+  const bestStreak = (who) => {
+    const days = [...counts[who].keys()].sort();
+    if (!days.length) return 0;
+    let best = 0; let run = 0;
+    for (let d = startOfDay(new Date(`${days[0]}T12:00:00`)); d <= today; d = addDays(d, 1)) {
+      if (on(who, d) > 0) { run += 1; best = Math.max(best, run); } else if (!isWeekend(d)) run = 0;
+    }
+    return best;
+  };
+  const mon = mondayOf(today);
+  const sum = (who, from, to) => { let n = 0; for (let d = from; d <= to; d = addDays(d, 1)) n += on(who, d); return n; };
+  const daysIn = Math.round((today - mon) / DAY); // 0 on Monday
+  const week = {}; const lastWeek = {}; const goalDays = {};
+  [...USERS, 'team'].forEach((w) => {
+    week[w] = sum(w, mon, today);
+    lastWeek[w] = sum(w, addDays(mon, -7), addDays(mon, -7 + daysIn));
+  });
+  USERS.forEach((u) => { let g = 0; for (let d = mon; d <= today; d = addDays(d, 1)) if (on(u, d) >= DAILY_GOAL) g += 1; goalDays[u] = g; });
+  const weekdaysSoFar = Math.min(5, daysIn + 1);
+  // Best day and best week, team.
+  let bestDay = 0; counts.team.forEach((v) => { bestDay = Math.max(bestDay, v); });
+  const weeks = new Map();
+  applied.forEach((j) => { const k = dayKey(mondayOf(j.applied_at)); weeks.set(k, (weeks.get(k) || 0) + 1); });
+  let bestWeek = 0; weeks.forEach((v) => { bestWeek = Math.max(bestWeek, v); });
+  return { applied, counts, on, today, mon, week, lastWeek, goalDays, weekdaysSoFar, streak, bestStreak, bestDay, bestWeek };
+}
+
+function goalRing(who, n) {
+  const r = 24; const c = 2 * Math.PI * r;
+  const pct = Math.min(1, n / DAILY_GOAL);
+  const left = Math.max(0, DAILY_GOAL - n);
+  return `<div class="an-ring" title="${who}: ${n} of ${DAILY_GOAL} today">
+    <svg viewBox="0 0 60 60" aria-hidden="true"><circle cx="30" cy="30" r="${r}" class="ring-track"/><circle cx="30" cy="30" r="${r}" class="ring-fill s-${userClass(who)}" stroke-dasharray="${(c * pct).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 30 30)"/></svg>
+    <div class="ring-num"><b>${n}</b><span>/${DAILY_GOAL}</span></div>
+    <div class="ring-who"><span class="mini-avatar ${userClass(who)}">${who[0]}</span>${who}</div>
+    <div class="ring-left">${n >= DAILY_GOAL ? (n > DAILY_GOAL ? `Goal hit · +${n - DAILY_GOAL}` : 'Goal hit ✓') : `${left} to go`}</div>
+  </div>`;
+}
+function delta(now, before) {
+  const d = now - before;
+  if (!before && !now) return '<span class="an-delta">Same as last week</span>';
+  if (d === 0) return '<span class="an-delta">Same pace as last week</span>';
+  return `<span class="an-delta ${d > 0 ? 'up' : 'down'}">${d > 0 ? '↑' : '↓'} ${Math.abs(d)} vs this point last week</span>`;
+}
+
+function sectionHero(a) {
+  const todayN = (u) => a.on(u, a.today);
+  const weekendToday = isWeekend(a.today);
+  const total = a.applied.length;
+  const next = MILESTONES.find((m) => m > total) || total + 100;
+  const prevM = [...MILESTONES].reverse().find((m) => m <= total) || 0;
+  const pct = Math.round(((total - prevM) / (next - prevM)) * 100);
+  return `<div class="an-hero">
+    <section class="an-card an-today">
+      <div class="an-h"><h3>Today</h3><span>${weekendToday ? 'Weekend · anything counts as bonus' : `Goal: ${DAILY_GOAL} each`}</span></div>
+      <div class="an-rings">${USERS.map((u) => goalRing(u, todayN(u))).join('')}</div>
+    </section>
+    <section class="an-card">
+      <div class="an-h"><h3>This week</h3><span>Mon–${fmtDay(a.today, { weekday: 'short' })}</span></div>
+      <div class="an-big">${a.week.team}<small> / ${WEEK_GOAL * USERS.length}</small></div>
+      ${delta(a.week.team, a.lastWeek.team)}
+      <ul class="an-split">${USERS.map((u) => `<li><span class="mini-avatar ${userClass(u)}">${u[0]}</span>${u}<b>${a.week[u]}</b><span class="an-mini-bar"><i class="s-${userClass(u)}" style="width:${Math.min(100, Math.round((a.week[u] / WEEK_GOAL) * 100))}%"></i></span><em>${a.goalDays[u]}/${a.weekdaysSoFar} goal days</em></li>`).join('')}</ul>
+    </section>
+    <section class="an-card">
+      <div class="an-h"><h3>Streak</h3><span>Days in a row applying</span></div>
+      <ul class="an-streaks">${USERS.map((u) => { const s = a.streak(u); const best = a.bestStreak(u); return `<li><span class="mini-avatar ${userClass(u)}">${u[0]}</span><span class="an-flame${s ? '' : ' off'}">🔥</span><b>${s}</b><span>${s === 1 ? 'day' : 'days'}</span><em>${best > s ? `Best ${best}` : s ? 'Personal best!' : 'Apply today to start'}</em></li>`; }).join('')}</ul>
+      <p class="an-foot">Weekends never break a streak.</p>
+    </section>
+    <section class="an-card">
+      <div class="an-h"><h3>Milestones</h3><span>Together</span></div>
+      <div class="an-big">${total}<small> applied</small></div>
+      <div class="an-progress" title="${next - total} to ${next}"><i style="width:${pct}%"></i></div>
+      <p class="an-foot">${next - total} more to <b>${next}</b> · best day ${a.bestDay} · best week ${a.bestWeek}</p>
+    </section>
+  </div>`;
+}
+
+function sectionLog(a) {
+  const day = (d, label) => {
+    const items = USERS.map((u) => {
+      const list = a.applied.filter((j) => j.applied_by === u && dayKey(j.applied_at) === dayKey(d)).sort((x, y) => new Date(x.applied_at) - new Date(y.applied_at));
+      return `<li><span class="mini-avatar ${userClass(u)}">${u[0]}</span><span class="an-log-who">${u} <b>${list.length}</b></span><span class="an-log-cos">${list.length ? list.map((j) => `<button type="button" class="an-co" data-jump="${escapeHtml(j.id)}" title="${escapeHtml(readableText(j.title || ''))} · ${timeOnly(new Date(j.applied_at))}">${coTile(j.company || '?', true)}${escapeHtml(readableText(j.company || 'Unknown'))}</button>`).join('') : '<span class="an-none">None</span>'}</span></li>`;
+    }).join('');
+    return `<div class="an-log-day"><h4>${label} <span>${fmtDay(d)}</span></h4><ul>${items}</ul></div>`;
+  };
+  return `<section class="an-card an-wide"><div class="an-h"><h3>Today &amp; yesterday</h3><span>Click a company to jump to it</span></div>${day(a.today, 'Today')}${day(addDays(a.today, -1), 'Yesterday')}</section>`;
+}
+
+// Bars with rounded tops, anchored to the baseline.
+function barPath(x, y, w, h, r = 3) {
+  if (h <= 0) return '';
+  const rr = Math.min(r, w / 2, h);
+  return `M${x},${y + h}V${y + rr}Q${x},${y} ${x + rr},${y}H${x + w - rr}Q${x + w},${y} ${x + w},${y + rr}V${y + h}Z`;
+}
+function sectionDaily(a) {
+  const days = 30;
+  const start = addDays(a.today, -(days - 1));
+  const W = 560; const H = 128; const top = 10; const bottom = 20; const left = 22; const right = 40;
+  const ph = H - top - bottom; const pw = W - left - right;
+  const max = Math.max(DAILY_GOAL + 1, ...USERS.flatMap((u) => Array.from({ length: days }, (_, i) => a.on(u, addDays(start, i)))));
+  const yOf = (v) => top + ph - (v / max) * ph;
+  const bw = pw / days;
+  const chart = (u) => {
+    let bars = ''; let bands = ''; let hit = 0; let n = 0;
+    for (let i = 0; i < days; i += 1) {
+      const d = addDays(start, i); const v = a.on(u, d); n += v;
+      if (!isWeekend(d) && v >= DAILY_GOAL) hit += 1;
+      const x = left + i * bw;
+      if (isWeekend(d)) bands += `<rect x="${x.toFixed(1)}" y="${top}" width="${bw.toFixed(1)}" height="${ph}" class="an-weekend"/>`;
+      const tip = `${fmtDay(d)} · ${u} applied ${v}${!isWeekend(d) ? (v >= DAILY_GOAL ? ' · goal hit ✓' : ` · ${DAILY_GOAL - v} short`) : ' · weekend'}`;
+      bars += `<path d="${barPath(x + 1, yOf(v), Math.max(2, bw - 2), top + ph - yOf(v))}" class="an-bar s-${userClass(u)}${v >= DAILY_GOAL ? '' : ' under'}"/>`;
+      bars += `<rect x="${x.toFixed(1)}" y="${top}" width="${bw.toFixed(1)}" height="${ph + bottom}" class="an-hit" data-tip="${escapeHtml(tip)}"/>`;
+    }
+    const gy = yOf(DAILY_GOAL).toFixed(1);
+    const labels = [0, 14, days - 1].map((i) => `<text x="${(left + i * bw + bw / 2).toFixed(1)}" y="${H - 5}" text-anchor="${i === 0 ? 'start' : i === days - 1 ? 'end' : 'middle'}" class="an-axis">${i === days - 1 ? 'Today' : fmtDay(addDays(start, i), { month: 'short', day: 'numeric' })}</text>`).join('');
+    const yl = [0, DAILY_GOAL, max].filter((v, i, arr) => arr.indexOf(v) === i).map((v) => `<text x="${left - 5}" y="${(yOf(v) + 3.5).toFixed(1)}" text-anchor="end" class="an-axis">${v}</text>`).join('');
+    return `<figure class="an-chart">
+      <figcaption><span class="mini-avatar ${userClass(u)}">${u[0]}</span>${u}<span class="an-cap">${n} in 30 days · goal hit ${hit} weekdays</span></figcaption>
+      <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${u}: ${n} applications in the last 30 days, daily goal hit on ${hit} weekdays.">
+        ${bands}<line x1="${left}" x2="${W - right}" y1="${top + ph}" y2="${top + ph}" class="an-base"/>
+        ${bars}<line x1="${left}" x2="${W - right}" y1="${gy}" y2="${gy}" class="an-goal"/><text x="${W - right + 5}" y="${(+gy + 3.5).toFixed(1)}" text-anchor="start" class="an-goal-label">goal ${DAILY_GOAL}</text>${yl}${labels}
+      </svg></figure>`;
+  };
+  return `<section class="an-card an-wide"><div class="an-h"><h3>Last 30 days</h3><span>Solid bars hit the goal · shaded = weekend</span></div><div class="an-charts">${USERS.map(chart).join('')}</div></section>`;
+}
+
+function sectionHeatmap(a) {
+  const weeks = 16;
+  const start = addDays(mondayOf(a.today), -7 * (weeks - 1));
+  const cell = 13; const gap = 3; const left = 26; const top = 16;
+  const teamGoal = DAILY_GOAL * USERS.length;
+  const level = (v) => (v === 0 ? 0 : v < DAILY_GOAL ? 1 : v < teamGoal ? 2 : v < teamGoal * 1.5 ? 3 : 4);
+  let cells = ''; let months = ''; let lastMonth = -1;
+  for (let w = 0; w < weeks; w += 1) {
+    const wkStart = addDays(start, w * 7);
+    if (wkStart.getMonth() !== lastMonth) { months += `<text x="${left + w * (cell + gap)}" y="10" class="an-axis">${fmtDay(wkStart, { month: 'short' })}</text>`; lastMonth = wkStart.getMonth(); }
+    for (let r = 0; r < 7; r += 1) {
+      const d = addDays(wkStart, r);
+      if (d > a.today) continue;
+      const v = a.on('team', d);
+      const parts = USERS.map((u) => `${u[0]} ${a.on(u, d)}`).join(', ');
+      cells += `<rect x="${left + w * (cell + gap)}" y="${top + r * (cell + gap)}" width="${cell}" height="${cell}" rx="3" class="heat h${level(v)}${dayKey(d) === dayKey(a.today) ? ' is-today' : ''}" data-tip="${escapeHtml(`${fmtDay(d)} · ${v} applied (${parts})`)}"/>`;
+    }
+  }
+  const rows = ['Mon', '', 'Wed', '', 'Fri', '', ''].map((t, r) => (t ? `<text x="${left - 5}" y="${top + r * (cell + gap) + 10}" text-anchor="end" class="an-axis">${t}</text>` : '')).join('');
+  const W = left + weeks * (cell + gap); const H = top + 7 * (cell + gap);
+  const legend = `<div class="heat-legend"><span>None</span>${[0, 1, 2, 3, 4].map((l) => `<i class="heat h${l}"></i>`).join('')}<span>${Math.round(teamGoal * 1.5)}+</span><em>Darker blue = team goal (${teamGoal}) met</em></div>`;
+  // Weekday pattern over the same window.
+  const dow = [0, 0, 0, 0, 0, 0, 0];
+  for (let d = start; d <= a.today; d = addDays(d, 1)) dow[(d.getDay() + 6) % 7] += a.on('team', d);
+  const top2 = Math.max(...dow);
+  const names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const bestDow = top2 ? names[dow.indexOf(top2)] : null;
+  return `<section class="an-card"><div class="an-h"><h3>Consistency</h3><span>Team, last ${weeks} weeks</span></div>
+    <svg class="an-heat" viewBox="0 0 ${W} ${H}" role="img" aria-label="Daily team applications over the last ${weeks} weeks">${months}${rows}${cells}</svg>${legend}
+    <div class="an-dow">${names.map((n, i) => `<div class="dow" data-tip="${escapeHtml(`${n}s: ${dow[i]} applied in ${weeks} weeks`)}"><span class="dow-bar"><i style="height:${top2 ? Math.max(4, Math.round((dow[i] / top2) * 100)) : 0}%"></i></span><span>${n[0]}</span></div>`).join('')}</div>
+    <p class="an-foot">${bestDow ? `You apply most on <b>${bestDow}s</b>. Protect that time.` : 'Your weekly rhythm shows up here.'}</p>
+  </section>`;
+}
+
+function hbar(label, n, max, tip = '', cls = '') {
+  return `<li class="an-hbar ${cls}"${tip ? ` data-tip="${escapeHtml(tip)}"` : ''}><span class="hb-label">${label}</span><span class="hb-track"><i style="width:${max ? Math.max(n ? 3 : 0, Math.round((n / max) * 100)) : 0}%"></i></span><b>${n}</b></li>`;
+}
+function sectionPipeline(a) {
+  const t0 = a.today; const from = addDays(t0, -27);
+  const added = state.jobs.filter((j) => new Date(j.added_at) >= from).length;
+  const cleared = state.jobs.filter((j) => (j.applied_at && new Date(j.applied_at) >= from) || (j.status === 'blocked' && j.blocked_at && new Date(j.blocked_at) >= from)).length;
+  const net = added - cleared;
+  const open = state.jobs.filter((j) => stageOf(j) === 'open');
+  const live = open.filter((j) => !isHeld(j));
+  const held = open.filter(isHeld);
+  const buckets = [['0–2 days', 0, 2], ['3–6 days', 3, 6], ['1–2 weeks', 7, 13], ['2+ weeks', 14, 9999]].map(([l, lo, hi]) => [l, live.filter((j) => { const d = daysOld(j.added_at); return d >= lo && d <= hi; }).length]);
+  const max = Math.max(1, ...buckets.map((b) => b[1]));
+  const oldestHold = held.length ? Math.max(...held.map(holdDays)) : 0;
+  const days = live.length && (a.week.team || a.lastWeek.team) ? Math.ceil(live.length / Math.max(1, (a.week.team + a.lastWeek.team) / Math.max(1, a.weekdaysSoFar * 2))) : null;
+  return `<section class="an-card"><div class="an-h"><h3>Pipeline health</h3><span>Last 4 weeks</span></div>
+    <div class="an-flow"><div><b>+${added}</b><span>added</span></div><div><b>−${cleared}</b><span>applied or blocked</span></div><div class="${net > 0 ? 'warn' : 'ok'}"><b>${net > 0 ? `+${net}` : net}</b><span>${net > 0 ? 'To apply is growing' : 'To apply is shrinking ✓'}</span></div></div>
+    <h4 class="an-sub">Open jobs by age (${live.length})</h4>
+    <ul class="an-hbars">${buckets.map(([l, n]) => hbar(l, n, max, `${n} open jobs added ${l} ago`, l === '2+ weeks' && n ? 'warn' : '')).join('')}</ul>
+    <p class="an-foot">${held.length ? `⏸ ${plural(held.length, 'job')} on hold, longest ${oldestHold}d. ` : ''}${days ? `At your recent pace, To apply clears in about <b>${plural(days, 'weekday')}</b>.` : ''}</p>
+  </section>`;
+}
+
+function sectionNetworking(a) {
+  const cutoff = addDays(a.today, -3);
+  const appliedOld = a.applied.filter((j) => new Date(j.applied_at) < cutoff);
+  const networked = appliedOld.filter((j) => j.network_status && j.network_status !== 'not_networked');
+  const pct = appliedOld.length ? Math.round((networked.length / appliedOld.length) * 100) : null;
+  const stuck = state.jobs.filter((j) => stageOf(j) === 'networking' && netStatus(j) === 'not_networked' && daysOld(j.applied_at) >= NUDGE_DAYS);
+  const success = a.applied.filter((j) => j.network_status === 'successful').length;
+  const stale = a.applied.filter((j) => j.network_status === 'stale').length;
+  return `<section class="an-card"><div class="an-h"><h3>Networking follow-through</h3><span>The habit that turns applications into interviews</span></div>
+    <div class="an-flow"><div><b>${pct === null ? '–' : `${pct}%`}</b><span>of applications networked</span></div><div class="${stuck.length ? 'warn' : 'ok'}"><b>${stuck.length}</b><span>waiting ${NUDGE_DAYS}+ days, not networked</span></div><div><b>${success}</b><span>successful · ${stale} stale</span></div></div>
+    ${stuck.length ? `<button type="button" class="btn secondary small an-go" data-goto="networking">Open Networking → ${plural(stuck.length, 'job')} to nudge</button>` : '<p class="an-foot">Nothing waiting. Nice.</p>'}
+  </section>`;
+}
+
+function sectionFunnel(a) {
+  const added = state.jobs.length;
+  const applied = a.applied.length;
+  const networked = a.applied.filter((j) => j.network_status && j.network_status !== 'not_networked').length;
+  const interviews = state.jobs.filter((j) => j.interview_at).length;
+  const offers = state.jobs.filter((j) => j.outcome === 'offer').length;
+  const rejected = state.jobs.filter((j) => j.outcome === 'rejected').length;
+  const steps = [['Added', added], ['Applied', applied], ['Networked', networked], ['Interview', interviews], ['Offer', offers]];
+  const rate = (n, of) => (of ? `${Math.round((n / of) * 100)}%` : '–');
+  return `<section class="an-card"><div class="an-h"><h3>Funnel</h3><span>All time</span></div>
+    <ul class="an-funnel">${steps.map(([l, n], i) => `<li data-tip="${escapeHtml(`${l}: ${n}${i ? ` · ${rate(n, steps[i - 1][1])} of ${steps[i - 1][0].toLowerCase()}` : ''}`)}"><span class="fn-label">${l}</span><span class="fn-track"><i style="width:${added ? Math.max(n ? 2 : 0, Math.round((n / added) * 100)) : 0}%"></i></span><b>${n}</b><em>${i ? rate(n, steps[i - 1][1]) : ''}</em></li>`).join('')}</ul>
+    <p class="an-foot">${interviews || offers || rejected ? `Interview rate: <b>${rate(interviews, applied)}</b> of applications${rejected ? ` · ${rejected} rejected` : ''}.` : 'Mark outcomes on Networking or History rows (⋯ → Set outcome) to fill in Interview and Offer.'}</p>
+  </section>`;
+}
+
+function sectionResumes(a) {
+  const rows = resumeDocs().map((d) => {
+    const sent = a.applied.filter((j) => j.resume_id === d.id);
+    const iv = sent.filter((j) => j.interview_at).length;
+    return { d, sent: sent.length, iv };
+  }).filter((r) => r.sent).sort((x, y) => y.sent - x.sent);
+  const noResume = a.applied.filter((j) => !j.resume_id).length;
+  return `<section class="an-card"><div class="an-h"><h3>Which resume works</h3><span>Interviews per resume sent</span></div>
+    ${rows.length ? `<table class="an-table"><thead><tr><th>Resume</th><th>Sent</th><th>Interviews</th><th>Rate</th></tr></thead><tbody>${rows.map((r) => `<tr><td><button type="button" class="an-link" data-open-doc="${escapeHtml(r.d.id)}">${escapeHtml(r.d.title)}</button><span>${escapeHtml(r.d.role_tag || '')}</span></td><td>${r.sent}</td><td>${r.iv}</td><td>${r.sent >= 5 ? `${Math.round((r.iv / r.sent) * 100)}%` : '<span title="Too few to tell yet">–</span>'}</td></tr>`).join('')}</tbody></table>` : '<p class="an-empty">Pick the <b>Resume sent</b> in a job’s Notes &amp; files panel and results show up here.</p>'}
+    <p class="an-foot">${noResume ? `${plural(noResume, 'application')} with no resume recorded. ` : ''}Rates show once a resume has been sent 5+ times.</p>
+  </section>`;
+}
+
+function sectionMix(a) {
+  const kinds = [['Chief of Staff', /chief of staff|\bcos\b/i], ['Strategy & Ops', /strateg|bizops|business operations|s&o/i], ['Operations', /operat|\bops\b/i], ['Program / Project', /program|project/i], ['Product', /product/i]];
+  const cat = (t) => (kinds.find(([, re]) => re.test(t || '')) || ['Other'])[0];
+  const m = new Map();
+  a.applied.forEach((j) => { const c = cat(j.title); m.set(c, (m.get(c) || 0) + 1); });
+  const list = [...m.entries()].sort((x, y) => y[1] - x[1]);
+  const max = Math.max(1, ...list.map((x) => x[1]));
+  const reasons = new Map();
+  state.jobs.filter((j) => j.status === 'blocked').forEach((j) => { const r = readableText(j.blocked_reason || '').trim() || 'No reason given'; const k = r.toLowerCase().slice(0, 48); const e = reasons.get(k) || [r.slice(0, 48), 0]; e[1] += 1; reasons.set(k, e); });
+  const rl = [...reasons.values()].sort((x, y) => y[1] - x[1]).slice(0, 5);
+  const rmax = Math.max(1, ...rl.map((x) => x[1]));
+  return `<section class="an-card"><div class="an-h"><h3>What you're applying to</h3><span>Applications by role type</span></div>
+    ${list.length ? `<ul class="an-hbars">${list.map(([l, n]) => hbar(escapeHtml(l), n, max, `${l}: ${n} applications`)).join('')}</ul>` : '<p class="an-empty">No applications yet.</p>'}
+    <h4 class="an-sub">Why jobs got blocked</h4>
+    ${rl.length ? `<ul class="an-hbars">${rl.map(([l, n]) => hbar(escapeHtml(l), n, rmax, `${l}: ${n}`, 'muted')).join('')}</ul>` : '<p class="an-empty">Nothing blocked yet.</p>'}
+  </section>`;
+}
+
+function renderAnalytics() {
+  if (!state.loadedOnce) return { html: '' };
+  const a = analyticsData();
+  return { html: `<div class="analytics">${sectionHero(a)}${sectionLog(a)}${sectionDaily(a)}<div class="an-grid">${sectionHeatmap(a)}${sectionPipeline(a)}${sectionNetworking(a)}${sectionFunnel(a)}${sectionResumes(a)}${sectionMix(a)}</div></div>` };
+}
+
+// Hover tooltips for charts (one floating box, follows the pointer).
+const chartTip = document.getElementById('chartTip');
+els.jobList.addEventListener('pointermove', (e) => {
+  const t = e.target.closest && e.target.closest('[data-tip]');
+  if (!t || state.tab !== 'analytics') { chartTip.classList.add('hidden'); return; }
+  chartTip.textContent = t.dataset.tip;
+  chartTip.classList.remove('hidden');
+  const w = chartTip.offsetWidth;
+  const x = e.clientX + w + 24 > innerWidth ? e.clientX - w - 12 : e.clientX + 12;
+  chartTip.style.left = `${Math.max(8, x)}px`;
+  chartTip.style.top = `${e.clientY + 16}px`;
+});
+els.jobList.addEventListener('pointerleave', () => chartTip.classList.add('hidden'));
+els.jobList.addEventListener('click', (e) => {
+  if (state.tab !== 'analytics' || state.query) return;
+  const j = e.target.closest('[data-jump]');
+  if (j) { jumpToRow(j.dataset.jump, 'job'); return; }
+  const g = e.target.closest('[data-goto]');
+  if (g) { setView(g.dataset.goto); return; }
+  const o = e.target.closest('[data-open-doc]');
+  if (o) openDoc(o.dataset.openDoc);
+});
 
 /* ---------- Colour theme + mode ---------- */
 // Palette (data-palette) and mode (data-theme: light | dark | unset = follow the device) are saved per browser.

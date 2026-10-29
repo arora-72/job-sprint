@@ -6,6 +6,8 @@ const NOTE_MAX_CHARS = 1000;
 const NOTE_MAX_COUNT = 200;
 const NOTE_RETRIES = 3;
 const HOLD_REASON_MAX = 120;
+// What happened after applying. 'interview' and 'offer' also stamp interview_at (kept even if a rejection follows).
+const OUTCOMES = ['interview', 'offer', 'rejected', 'withdrawn'];
 
 const json = (statusCode, body) => ({ statusCode, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }, body: JSON.stringify(body) });
 const bad = (message) => json(400, { error: message });
@@ -19,7 +21,7 @@ const CLEARED_NETWORK = {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const JOB_COLUMNS = ['id', 'company', 'title', 'location', 'url', 'status', 'added_by', 'added_at', 'applied_by', 'applied_at',
   'blocked_by', 'blocked_at', 'blocked_reason', 'assigned_to', 'network_status', 'network_updated_by', 'network_updated_at',
-  'network_closed_by', 'network_closed_at', 'notes', 'priority', 'hold_reason', 'hold_since', 'hold_by', 'resume_id', 'updated_at'];
+  'network_closed_by', 'network_closed_at', 'notes', 'priority', 'hold_reason', 'hold_since', 'hold_by', 'resume_id', 'outcome', 'outcome_at', 'outcome_by', 'interview_at', 'updated_at'];
 
 const isPriority = (v) => typeof v === 'number' && Number.isFinite(v) && Math.abs(v) < 1e12;
 
@@ -46,6 +48,8 @@ function cleanRestoredJob(row) {
   if (out.hold_reason != null && !str(out.hold_reason, HOLD_REASON_MAX)) return { error: 'Invalid hold reason.' };
   if (!when(out.hold_since) || !who(out.hold_by)) return { error: 'Invalid hold.' };
   if (out.resume_id != null && !UUID.test(out.resume_id)) return { error: 'Invalid resume.' };
+  if (out.outcome != null && !OUTCOMES.includes(out.outcome)) return { error: 'Invalid outcome.' };
+  if (!when(out.outcome_at) || !when(out.interview_at) || !who(out.outcome_by)) return { error: 'Invalid outcome.' };
   return { row: out };
 }
 
@@ -180,6 +184,30 @@ async function handlePatch(body) {
     if (rid !== null && !UUID.test(rid || '')) return bad('Invalid resume.');
     const job = await patchJob(byId(id), { resume_id: rid, updated_at: now });
     return job ? json(200, { job }) : json(404, { error: 'Job not found.' });
+  }
+
+  // Outcome after applying: interview, offer, rejected, withdrawn, or null to clear.
+  // Undo passes the previous values back in `restore` so dates stay honest.
+  if (action === 'outcome') {
+    const outcome = body.outcome;
+    if (outcome !== null && !OUTCOMES.includes(outcome)) return bad('Invalid outcome.');
+    let patch;
+    if (body.restore) {
+      const r = body.restore;
+      const okWhen = (v) => v === null || isIsoDate(v);
+      if (!okWhen(r.outcome_at) || !okWhen(r.interview_at) || !(r.outcome_by === null || USERS.includes(r.outcome_by))) return bad('Invalid undo.');
+      patch = { outcome, outcome_at: r.outcome_at, outcome_by: r.outcome_by, interview_at: r.interview_at, updated_at: now };
+    } else {
+      patch = outcome === null
+        ? { outcome: null, outcome_at: null, outcome_by: null, updated_at: now }
+        : { outcome, outcome_at: now, outcome_by: actor, updated_at: now };
+      if (outcome === 'interview' || outcome === 'offer') {
+        const rows = await supabase(`${byId(id)}&select=interview_at`);
+        if (rows?.[0] && !rows[0].interview_at) patch.interview_at = now;
+      }
+    }
+    const job = await patchJob(`${byId(id)}&status=neq.pipeline`, patch);
+    return job ? json(200, { job }) : json(409, { error: 'Mark it Applied first, then set the outcome.' });
   }
 
   if (action === 'unhold') {
