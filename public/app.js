@@ -3476,61 +3476,132 @@ function sectionMix(a) {
 }
 
 
-// Weekly applications, together: a filled line over the last 12 weeks (Mon–Sun), with the team goal.
-function sectionWeekly(a) {
-  const teamGoal = WEEK_GOAL * USERS.length;
-  const thisMon = mondayOf(a.today);
-  // Start at the first week with any applications (up to 12 weeks back, at least 4 shown).
+// Trend chart at the top of Analytics: a line per person (plus an optional "Together" line),
+// sliced by Day, 3 days, Week, 2 weeks, or as running totals for MTD and YTD. Remembered per browser.
+let trendPhone = window.innerWidth <= 720;
+window.addEventListener('resize', () => { const p = window.innerWidth <= 720; if (p !== trendPhone) { trendPhone = p; if (state.tab === 'analytics') render(); } });
+const TREND_RANGES = [['day', 'Day'], ['3d', '3 days'], ['week', 'Week'], ['2w', '2 weeks'], ['mtd', 'MTD'], ['ytd', 'YTD']];
+const TREND_SERIES = [...USERS, 'Together'];
+state.anRange = TREND_RANGES.some(([k]) => k === store.get('jobSprintAnRange')) ? store.get('jobSprintAnRange') : 'week';
+state.anSeries = (() => { try { const v = JSON.parse(store.get('jobSprintAnSeries') || 'null'); return Array.isArray(v) && v.length ? v.filter((x) => TREND_SERIES.includes(x)) : [...USERS]; } catch { return [...USERS]; } })();
+function weekdaysBetween(from, to) { let n = 0; for (let d = startOfDay(from); d <= to; d = addDays(d, 1)) if (!isWeekend(d)) n += 1; return n; }
+function sumBetween(a, who, from, to) { let n = 0; for (let d = startOfDay(from); d <= to; d = addDays(d, 1)) n += who === 'Together' ? a.on('team', d) : a.on(who, d); return n; }
+function trendBuckets(a, range) {
+  const today = a.today;
+  const short = (d) => fmtDay(d, { month: 'short', day: 'numeric' });
   const firstApplied = a.applied.reduce((m, j) => Math.min(m, new Date(j.applied_at).getTime()), Infinity);
-  const sinceFirst = Number.isFinite(firstApplied) ? Math.round((thisMon - mondayOf(firstApplied)) / (7 * DAY)) + 1 : 1;
-  const weeks = Math.max(4, Math.min(12, sinceFirst));
-  const data = Array.from({ length: weeks }, (_, i) => {
-    const mon = addDays(thisMon, -7 * (weeks - 1 - i));
-    const end = i === weeks - 1 ? a.today : addDays(mon, 6);
-    const per = {};
-    USERS.forEach((u) => { let n = 0; for (let d = mon; d <= end; d = addDays(d, 1)) n += a.on(u, d); per[u] = n; });
-    return { mon, per, total: USERS.reduce((t, u) => t + per[u], 0), current: i === weeks - 1 };
-  });
-  const W = 760; const H = 190; const top = 22; const bottom = 26; const left = 30; const right = 54;
+  const make = (start, end, label, tipLabel) => ({ start, end, label, tipLabel, weekdays: weekdaysBetween(start, end) });
+  let list = [];
+  if (range === 'day') {
+    for (let i = 29; i >= 0; i -= 1) { const d = addDays(today, -i); list.push(make(d, d, i === 0 ? 'Today' : short(d), fmtDay(d))); }
+  } else if (range === '3d') {
+    for (let i = 11; i >= 0; i -= 1) { const end = addDays(today, -3 * i); const start = addDays(end, -2); list.push(make(start, end, i === 0 ? 'Last 3 days' : short(start), `${short(start)}–${short(end)}`)); }
+  } else if (range === 'week' || range === '2w') {
+    const step = range === 'week' ? 1 : 2;
+    const thisMon = mondayOf(today);
+    const lastStart = addDays(thisMon, -7 * (step - 1));
+    const since = Number.isFinite(firstApplied) ? Math.floor((lastStart - mondayOf(firstApplied)) / (7 * step * DAY)) + 1 : 1;
+    const n = Math.max(4, Math.min(12, since));
+    for (let i = n - 1; i >= 0; i -= 1) {
+      const start = addDays(lastStart, -7 * step * i);
+      const end = i === 0 ? today : addDays(start, 7 * step - 1);
+      list.push(make(start, end, i === 0 ? (step === 1 ? 'This week' : 'These 2 wks') : short(start), `${step === 1 ? 'Week' : '2 weeks'} of ${short(start)}${i === 0 ? ' (so far)' : ''}`));
+    }
+  } else if (range === 'mtd') {
+    const first = new Date(today.getFullYear(), today.getMonth(), 1);
+    for (let d = first; d <= today; d = addDays(d, 1)) list.push(make(first, d, dayKey(d) === dayKey(today) ? 'Today' : short(d), `${fmtDay(first, { month: 'long' })} 1–${d.getDate()}`));
+  } else { // ytd, weekly running total from the first week you applied this year
+    const jan1 = new Date(today.getFullYear(), 0, 1);
+    const from = Number.isFinite(firstApplied) && firstApplied > jan1.getTime() ? mondayOf(firstApplied) : mondayOf(jan1);
+    // Count (and pace the goal) from the first week you applied, so months before you started don't count against you.
+    for (let d = from; d <= today; d = addDays(d, 7)) { const end = addDays(d, 6) > today ? today : addDays(d, 6); list.push(make(from, end, end === today ? 'Today' : short(d), `${short(from)} to ${short(end)}`)); }
+    if (!list.length || dayKey(list[list.length - 1].end) !== dayKey(today)) list.push(make(from, today, 'Today', `${short(from)} to ${short(today)}`));
+  }
+  return list;
+}
+// The headline period for each slice, and the equal period before it (to compare pace).
+function trendPeriod(a, range) {
+  const t = a.today;
+  if (range === 'day') return { start: t, prev: [addDays(t, -1), addDays(t, -1)], label: 'Today', prevLabel: 'yesterday' };
+  if (range === '3d') return { start: addDays(t, -2), prev: [addDays(t, -5), addDays(t, -3)], label: 'Last 3 days', prevLabel: 'the 3 days before' };
+  if (range === 'week') { const m = mondayOf(t); const k = Math.round((t - m) / DAY); return { start: m, prev: [addDays(m, -7), addDays(m, -7 + k)], label: 'This week', prevLabel: 'this point last week' }; }
+  if (range === '2w') { const m = addDays(mondayOf(t), -7); const k = Math.round((t - m) / DAY); return { start: m, prev: [addDays(m, -14), addDays(m, -14 + k)], label: 'These 2 weeks', prevLabel: 'the 2 weeks before' }; }
+  if (range === 'mtd') { const f = new Date(t.getFullYear(), t.getMonth(), 1); const pf = new Date(t.getFullYear(), t.getMonth() - 1, 1); const pe = new Date(t.getFullYear(), t.getMonth() - 1, Math.min(t.getDate(), new Date(t.getFullYear(), t.getMonth(), 0).getDate())); return { start: f, prev: [pf, pe], label: `${fmtDay(t, { month: 'long' })} so far`, prevLabel: 'this point last month' }; }
+  const jan1 = new Date(t.getFullYear(), 0, 1);
+  const firstApplied = a.applied.reduce((m, j) => Math.min(m, new Date(j.applied_at).getTime()), Infinity);
+  const start = Number.isFinite(firstApplied) && firstApplied > jan1.getTime() ? mondayOf(firstApplied) : jan1;
+  return { start, prev: null, label: `${t.getFullYear()} so far`, prevLabel: '', since: start > jan1 ? fmtDay(start, { month: 'short', day: 'numeric' }) : '' };
+}
+function sectionTrend(a) {
+  const range = state.anRange;
+  const cumulative = range === 'mtd' || range === 'ytd';
+  const shown = TREND_SERIES.filter((s) => state.anSeries.includes(s));
+  const buckets = trendBuckets(a, range);
+  const vals = (who) => buckets.map((b) => sumBetween(a, who, b.start, b.end));
+  const series = shown.map((who) => ({ who, v: vals(who), cls: who === 'Together' ? 'together' : userClass(who) }));
+  const personGoal = (b) => DAILY_GOAL * b.weekdays;
+  const onlyTeam = shown.length === 1 && shown[0] === 'Together';
+  const goalOf = (b) => personGoal(b) * (onlyTeam ? USERS.length : 1);
+  const n = buckets.length;
+  // Draw at phone proportions on small screens so text stays readable (not a shrunk desktop chart).
+  const phone = window.innerWidth <= 720;
+  const W = phone ? 360 : 760; const H = phone ? 230 : 210; const top = 18; const bottom = 26; const left = 30; const right = phone ? 34 : 64;
   const pw = W - left - right; const ph = H - top - bottom;
-  const max = Math.max(teamGoal * 1.15, ...data.map((d) => d.total)) || 1;
-  const xOf = (i) => left + (pw * i) / (weeks - 1);
+  // Round the axis to a clean step (1, 2, 5, 10, 20, 25, 50…) with at most 4 gridlines.
+  const peak = Math.max(1, ...series.flatMap((s) => s.v), ...buckets.map(goalOf));
+  const step = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000].find((st) => peak / st <= 4) || 1000;
+  const max = Math.ceil((peak * 1.04) / step) * step;
+  const xOf = (i) => (n === 1 ? left + pw / 2 : left + (pw * i) / (n - 1));
   const yOf = (v) => top + ph - (v / max) * ph;
-  const pts = data.map((d, i) => [xOf(i), yOf(d.total)]);
-  const line = pts.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`).join('');
-  const area = `${line}L${xOf(weeks - 1).toFixed(1)},${top + ph}L${xOf(0).toFixed(1)},${top + ph}Z`;
-  const gy = yOf(teamGoal).toFixed(1);
-  const grid = [0, Math.round(teamGoal / 2), teamGoal].map((v) => `<line x1="${left}" x2="${W - right}" y1="${yOf(v).toFixed(1)}" y2="${yOf(v).toFixed(1)}" class="${v === teamGoal ? 'an-goal' : 'an-grid'}"/><text x="${left - 6}" y="${(yOf(v) + 3.5).toFixed(1)}" text-anchor="end" class="an-axis">${v}</text>`).join('');
-  const every = weeks > 8 ? 2 : 1; // label every week, or every other week counting back from this one
-  const xl = data.map((d, i) => ((weeks - 1 - i) % every === 0 ? `<text x="${xOf(i).toFixed(1)}" y="${H - 7}" text-anchor="${i === 0 ? 'start' : i === weeks - 1 ? 'end' : 'middle'}" class="an-axis${d.current ? ' an-axis-now' : ''}">${d.current ? 'This week' : fmtDay(d.mon, { month: 'short', day: 'numeric' })}</text>` : '')).join('');
-  const dots = data.map((d, i) => {
-    const tip = `${d.current ? 'This week so far' : `Week of ${fmtDay(d.mon, { month: 'short', day: 'numeric' })}`} · ${d.total} applied (${USERS.map((u) => `${u} ${d.per[u]}`).join(', ')})${d.total >= teamGoal ? ' · goal hit ✓' : ` · goal ${teamGoal}`}`;
-    return `<circle cx="${pts[i][0].toFixed(1)}" cy="${pts[i][1].toFixed(1)}" r="${d.current ? 5 : 4}" class="an-dot${d.current ? ' now' : ''}"/><rect x="${(pts[i][0] - pw / (weeks - 1) / 2).toFixed(1)}" y="${top}" width="${(pw / (weeks - 1)).toFixed(1)}" height="${ph + bottom}" class="an-hit" data-tip="${escapeHtml(tip)}"/>`;
+  const path = (v) => v.map((y, i) => `${i ? 'L' : 'M'}${xOf(i).toFixed(1)},${yOf(y).toFixed(1)}`).join('');
+  const ticks = Array.from({ length: Math.round(max / step) + 1 }, (_, i) => i * step);
+  const grid = ticks.map((v) => `<line x1="${left}" x2="${W - right}" y1="${yOf(v).toFixed(1)}" y2="${yOf(v).toFixed(1)}" class="an-grid"/><text x="${left - 6}" y="${(yOf(v) + 3.5).toFixed(1)}" text-anchor="end" class="an-axis">${v}</text>`).join('');
+  const colW = n === 1 ? pw : pw / (n - 1);
+  // Running totals get a continuous pace line; per-period views get a flat goal mark per period
+  // (none on weekend days, whose goal is zero).
+  const goalPath = cumulative
+    ? buckets.map((b, i) => `${i ? 'L' : 'M'}${xOf(i).toFixed(1)},${yOf(goalOf(b)).toFixed(1)}`).join('')
+    : buckets.map((b, i) => (goalOf(b) ? `M${Math.max(left, xOf(i) - colW * 0.42).toFixed(1)},${yOf(goalOf(b)).toFixed(1)}H${Math.min(W - right, xOf(i) + colW * 0.42).toFixed(1)}` : '')).join('');
+  const goalLbl = '';
+  const areas = (cumulative || n <= 14 ? series : []).filter((s) => s.who !== 'Together').map((s) => `<path d="${path(s.v)}L${xOf(n - 1).toFixed(1)},${top + ph}L${xOf(0).toFixed(1)},${top + ph}Z" class="tr-area s-${s.cls}"/>`).join('');
+  const lines = series.map((s) => `<path d="${path(s.v)}" class="tr-line s-${s.cls}"/>`).join('');
+  const dots = n <= 31 ? series.map((s) => s.v.map((y, i) => `<circle cx="${xOf(i).toFixed(1)}" cy="${yOf(y).toFixed(1)}" r="${n > 20 ? 2.5 : 3.5}" class="tr-dot s-${s.cls}"/>`).join('')).join('') : '';
+  // Direct labels at the right end, nudged apart so they never overlap.
+  const ends = series.map((s) => ({ s, y: yOf(s.v[n - 1]) })).sort((p, q) => p.y - q.y);
+  for (let i = 1; i < ends.length; i += 1) if (ends[i].y - ends[i - 1].y < 13) ends[i].y = ends[i - 1].y + 13;
+  const endLabels = ends.map(({ s, y }) => `<text x="${(xOf(n - 1) + 8).toFixed(1)}" y="${(y + 4).toFixed(1)}" class="an-end-label">${s.v[n - 1]}</text>`).join('');
+  const every = Math.ceil(n / (phone ? 3 : 7));
+  const xl = buckets.map((b, i) => ((n - 1 - i) % every === 0 ? `<text x="${xOf(i).toFixed(1)}" y="${H - 7}" text-anchor="${i === n - 1 ? 'end' : i === 0 ? 'start' : 'middle'}" class="an-axis${i === n - 1 ? ' an-axis-now' : ''}">${escapeHtml(b.label)}</text>` : '')).join('');
+  const hits = buckets.map((b, i) => {
+    const parts = TREND_SERIES.map((w) => `${w} ${sumBetween(a, w, b.start, b.end)}`).join(' · ');
+    const tip = `${b.tipLabel}${cumulative ? ' (running total)' : ''}: ${parts} · goal ${personGoal(b)} each`;
+    return `<rect x="${(xOf(i) - colW / 2).toFixed(1)}" y="${top}" width="${colW.toFixed(1)}" height="${ph + bottom}" class="an-hit" data-tip="${escapeHtml(tip)}"/>`;
   }).join('');
-  const last = data[weeks - 1]; const prev = data[weeks - 2];
-  const endLabel = `<text x="${(pts[weeks - 1][0] + 9).toFixed(1)}" y="${(pts[weeks - 1][1] + 4).toFixed(1)}" class="an-end-label">${last.total}</text>`;
-  const goalLabel = `<text x="${W - right + 9}" y="${(+gy + 3.5).toFixed(1)}" class="an-goal-label">goal ${teamGoal}</text>`;
-  const best = weeks > 1 ? Math.max(...data.slice(0, -1).map((d) => d.total)) : 0;
-  const pct = Math.min(100, Math.round((last.total / teamGoal) * 100));
+  // Headline: the current period for this slice, per person and together, vs the period before.
+  const per = trendPeriod(a, range);
+  const now = (w) => sumBetween(a, w, per.start, a.today);
+  const before = (w) => (per.prev ? sumBetween(a, w, per.prev[0], per.prev[1]) : null);
+  const goalNow = DAILY_GOAL * weekdaysBetween(per.start, a.today);
+  const cmp = (w) => { const b = before(w); if (b === null) return ''; const d = now(w) - b; return d ? `<span class="an-delta ${d > 0 ? 'up' : 'down'}">${d > 0 ? '↑' : '↓'} ${Math.abs(d)}</span>` : '<span class="an-delta">same</span>'; };
+  const stat = (w) => `<div class="tr-stat${state.anSeries.includes(w) ? '' : ' off'}"><span class="tr-key s-${w === 'Together' ? 'together' : userClass(w)}"></span><span class="tr-who">${w}</span><b>${now(w)}</b><small>/ ${w === 'Together' ? goalNow * USERS.length : goalNow}</small>${cmp(w)}</div>`;
   return `<section class="an-card an-weekly">
-    <div class="an-weekly-head">
-      <div>
-        <h3>This week, together</h3>
-        <div class="an-big">${last.total}<small> of ${teamGoal} goal · ${pct}%</small></div>
-        <div class="an-weekly-split">${USERS.map((u) => `<span><span class="mini-avatar ${userClass(u)}">${u[0]}</span>${u} <b>${last.per[u]}</b><em>${a.goalDays[u]}/${a.weekdaysSoFar} goal days</em></span>`).join('')}${delta(a.week.team, a.lastWeek.team)}</div>
-      </div>
-      <p class="an-weekly-note">Last week: <b>${prev.total}</b> · best week: <b>${best}</b> · goal ${WEEK_GOAL} each (${DAILY_GOAL} a weekday)</p>
+    <div class="tr-head">
+      <div><h3>${escapeHtml(per.label)}</h3><p class="an-weekly-note">${per.prev ? `Arrows compare with ${per.prevLabel}. ` : ''}${per.since ? `Counting from ${per.since}, your first week. ` : ''}Goal: ${DAILY_GOAL} a weekday each.</p></div>
+      <div class="view-toggle tr-ranges" role="group" aria-label="Time range">${TREND_RANGES.map(([k, l]) => `<button type="button" class="${k === range ? 'on' : ''}" data-tr-range="${k}" aria-pressed="${k === range}">${l}</button>`).join('')}</div>
     </div>
-    <svg viewBox="0 0 ${W} ${H}" class="an-weekly-chart" role="img" aria-label="Applications per week, together, last 12 weeks. This week ${last.total} of ${teamGoal}. Last week ${prev.total}.">
-      ${grid}<path d="${area}" class="an-area"/><path d="${line}" class="an-line"/>${goalLabel}${dots}${endLabel}${xl}
+    <div class="tr-stats">${TREND_SERIES.map(stat).join('')}</div>
+    <div class="tr-legend" role="group" aria-label="Lines to show">${TREND_SERIES.map((w) => `<button type="button" class="tr-chip${state.anSeries.includes(w) ? ' on' : ''}" data-tr-series="${w}" aria-pressed="${state.anSeries.includes(w)}"><span class="tr-key s-${w === 'Together' ? 'together' : userClass(w)}"></span>${w}</button>`).join('')}<span class="tr-legend-goal"><i></i>${cumulative ? 'Goal pace' : 'Goal'}${onlyTeam ? ' (together)' : ' (each)'}</span></div>
+    <svg viewBox="0 0 ${W} ${H}" class="an-weekly-chart" role="img" aria-label="${escapeHtml(`${TREND_RANGES.find(([k]) => k === range)[1]} view. ${series.map((s) => `${s.who}: ${s.v[n - 1]} in the latest ${cumulative ? 'running total' : 'period'}`).join('. ')}.`)}">
+      ${grid}${areas}<path d="${goalPath}" class="an-goal tr-goal"/>${goalLbl}${lines}${dots}${endLabels}${hits}${xl}
     </svg>
+    ${series.length ? '' : '<p class="an-empty">Pick at least one line to show.</p>'}
   </section>`;
 }
 
 function renderAnalytics() {
   if (!state.loadedOnce) return { html: '' };
   const a = analyticsData();
-  return { html: `<div class="analytics">${sectionWeekly(a)}${sectionHero(a)}${sectionLog(a)}${sectionDaily(a)}<div class="an-grid">${sectionHeatmap(a)}${sectionPipeline(a)}${sectionNetworking(a)}${sectionFunnel(a)}${sectionResumes(a)}${sectionMix(a)}</div></div>` };
+  return { html: `<div class="analytics">${sectionTrend(a)}${sectionHero(a)}${sectionLog(a)}${sectionDaily(a)}<div class="an-grid">${sectionHeatmap(a)}${sectionPipeline(a)}${sectionNetworking(a)}${sectionFunnel(a)}${sectionResumes(a)}${sectionMix(a)}</div></div>` };
 }
 
 // Hover tooltips for charts (one floating box, follows the pointer).
@@ -3548,6 +3619,16 @@ els.jobList.addEventListener('pointermove', (e) => {
 els.jobList.addEventListener('pointerleave', () => chartTip.classList.add('hidden'));
 els.jobList.addEventListener('click', (e) => {
   if (state.tab !== 'analytics' || state.query) return;
+  const rg = e.target.closest('[data-tr-range]');
+  if (rg) { state.anRange = rg.dataset.trRange; store.set('jobSprintAnRange', state.anRange); render(); return; }
+  const sr = e.target.closest('[data-tr-series]');
+  if (sr) {
+    const w = sr.dataset.trSeries;
+    state.anSeries = state.anSeries.includes(w) ? state.anSeries.filter((x) => x !== w) : [...state.anSeries, w];
+    store.set('jobSprintAnSeries', JSON.stringify(state.anSeries));
+    render();
+    return;
+  }
   const j = e.target.closest('[data-jump]');
   if (j) { jumpToRow(j.dataset.jump, 'job'); return; }
   const g = e.target.closest('[data-goto]');

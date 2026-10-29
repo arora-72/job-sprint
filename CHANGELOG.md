@@ -4,6 +4,13 @@ Changes to Job Sprint are recorded here. The initial Git snapshot is `v1.0.0`. E
 
 ## Unreleased
 
+### Adjustable trend chart (Analytics)
+
+- The top of Analytics is now one adjustable chart with a line for **Garima** and **Indresh**, and an optional dashed **Together** line. Tap the chips to show or hide each.
+- Slice it by **Day** (last 30 days), **3 days**, **Week**, **2 weeks**, or as running totals: **MTD** (since the 1st) and **YTD** (since your first week). The headline cards follow the choice: today, last 3 days, this week, these 2 weeks, month so far, year so far, each vs its goal and vs the period before.
+- Per-period views show a flat goal mark per period (none on weekend days); MTD and YTD show the goal pace line. Hover any point for the full split. The choice is remembered per browser.
+- On phones the chart is drawn at phone size so labels stay readable.
+
 ### Smoother updates, aligned rows, weekly chart
 
 - **No more repeated refreshes.** One click (Applied, a note, an outcome) used to rebuild the list 8 times and re-download everything (jobs, Discover, companies, to-dos, files). Now it rebuilds once and re-reads only what changed, a moment after you finish. Background reloads wait while a menu is open, and the list is only redrawn when something on it actually changed. Rows fade in on first load only.

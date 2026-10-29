@@ -1287,3 +1287,38 @@ i.heat { display: inline-block; width: 12px; height: 12px; border-radius: 3px; b
 .an-hero { grid-template-columns: 1.4fr 1fr 1fr; }
 @media (max-width: 1100px) { .an-hero { grid-template-columns: 1fr 1fr; } .an-hero .an-today { grid-column: 1 / -1; } }
 @media (max-width: 720px) { .an-hero { grid-template-columns: 1fr; } }
+
+/* Adjustable trend chart (top of Analytics) */
+:root { --s-together: #1baf7a; } :root[data-resolved="dark"] { --s-together: #199e70; }
+.s-together { --s: var(--s-together); }
+.tr-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.tr-head h3 { margin: 0 0 4px; font-size: 14px; font-weight: 700; color: var(--text); }
+.tr-ranges { margin-left: 0; }
+.tr-ranges button { padding: 0 10px; }
+.tr-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 14px 0 8px; }
+.tr-stat { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 6px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); }
+.tr-stat.off { opacity: .55; }
+.tr-stat .tr-who { font-size: 13px; font-weight: 600; color: var(--text-2); margin-right: auto; }
+.tr-stat b { font-family: 'Source Serif 4', Georgia, serif; font-size: 28px; line-height: 1; color: var(--text); font-variant-numeric: tabular-nums; }
+.tr-stat small { font-size: 12px; color: var(--text-3); }
+.tr-stat .an-delta { margin-top: 0; width: 100%; text-align: right; }
+.tr-key { display: inline-block; width: 12px; height: 4px; border-radius: 2px; background: var(--s); align-self: center; }
+.tr-legend { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+.tr-chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); color: var(--text-3); font-size: 12.5px; font-weight: 600; }
+.tr-chip.on { color: var(--text); border-color: var(--border-strong); background: var(--surface-2); }
+.tr-chip:not(.on) .tr-key { opacity: .35; }
+.tr-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tr-legend-goal { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; font-size: 12px; color: var(--text-3); }
+.tr-legend-goal i { display: inline-block; width: 18px; border-top: 1.5px dashed var(--text-2); }
+.tr-line { fill: none; stroke: var(--s); stroke-width: 2.25; stroke-linejoin: round; stroke-linecap: round; }
+.tr-line.s-together { stroke-width: 2; stroke-dasharray: 6 4; }
+.tr-area { fill: var(--s); opacity: .12; }
+.tr-dot { fill: var(--s); stroke: var(--surface); stroke-width: 1.5; }
+.tr-goal { fill: none; }
+@media (max-width: 720px) {
+  .tr-ranges { width: 100%; overflow-x: auto; }
+  .tr-ranges button { flex: 1; white-space: nowrap; padding: 0 6px; font-size: 12px; }
+  .tr-stats { grid-template-columns: 1fr; gap: 6px; }
+  .tr-stat .an-delta { width: auto; }
+  .tr-legend-goal { margin-left: 0; width: 100%; }
+}
