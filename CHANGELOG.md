@@ -4,6 +4,14 @@ Changes to Job Sprint are recorded here. The initial Git snapshot is `v1.0.0`. E
 
 ## Unreleased
 
+### Tag jobs in to-dos
+
+- Type **@** in the to-do box to tag a job or company. A dropdown suggests matches by role or company as you type (open roles first), with the tab each one is in. Arrow keys + Enter or Tab, or click, to pick. The @text is removed and the job shows as a chip.
+- Auto-spot: if the to-do mentions a company you have (for example "Prep for Anduril chat"), a hint offers **Link to Anduril · Chief of Staff?** One click links it, × ignores it. If there are more roles at that company, the hint says so; use @ to pick a different one.
+- Clicking a tagged job or company in a to-do now **jumps to its row**: the panel closes, the right tab opens, filters and search clear if they would hide it, and the row flashes. A small ↗ on job chips opens the posting.
+- Job chips now read "Company · Role". All matching runs in the browser on data already loaded: no AI, no extra requests.
+- Front-end only. No database change.
+
 ### Search
 
 - A search box sits at the top of the list. Type a role, a company, a location (or a tracked contact's name) and every tab is searched at once. Several words narrow the results, so `ops lead faire` finds the BizOps Lead role at Faire.

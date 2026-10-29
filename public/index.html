@@ -277,9 +277,12 @@
     <form id="todoForm" class="tadd" novalidate autocomplete="off">
       <span class="plus" aria-hidden="true">+</span>
       <span id="todoDraft" class="tdraft hidden"></span>
-      <input id="todoInput" type="text" maxlength="500" placeholder="Add a to-do" aria-label="New to-do" enterkeyhint="done" />
+      <input id="todoInput" type="text" maxlength="500" placeholder="Add a to-do" aria-label="New to-do" enterkeyhint="done" role="combobox" aria-autocomplete="list" aria-controls="todoSuggest" aria-expanded="false" />
       <kbd class="tkbd">Enter</kbd>
     </form>
+    <ul id="todoSuggest" class="tsuggest hidden" role="listbox" aria-label="Tag a job or company"></ul>
+    <div id="todoHint" class="thint hidden"></div>
+    <p class="tadd-tip">Type <b>@</b> to tag a job or company</p>
     <div id="todoScroll" class="tscroll">
       <ul id="todoOpenList" class="tlist" aria-label="Open to-dos"></ul>
       <div id="todoDoneWrap"></div>

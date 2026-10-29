@@ -46,7 +46,9 @@ const state = {
   todosLoading: false,
   todoOpen: false,      // panel visible
   todoView: null,       // whose list the panel shows: 'Garima' | 'Indresh'
-  todoDraftLink: null,  // { kind, id, label } when adding from a job or company menu
+  todoDraftLink: null,
+  todoSuggest: null,    // { start, items, index } while an @tag dropdown is open
+  todoHintOff: '',      // company key the user dismissed the auto-link hint for  // { kind, id, label } when adding from a job or company menu
   todoEditing: null,    // id of the item being edited
   todoDrag: null,       // drag state while reordering
   todoChecking: new Set(), // ids mid tick animation
@@ -60,7 +62,7 @@ const els = {};
 [
   'linkedinCopy', 'linkedinLabel', 'linkedinEdit', 'linkedinForm', 'linkedinInput', 'linkedinWho', 'linkedinErr', 'linkedinCancel',
   'userModal', 'switchUser', 'activeUser', 'activeUserAvatar', 'soundToggle', 'todoBtn', 'todoCount', 'todoBackdrop', 'todoDrawer', 'todoTitle', 'todoSub', 'closeTodo',
-  'todoSwitch', 'todoForm', 'todoInput', 'todoDraft', 'todoScroll', 'todoOpenList', 'todoDoneWrap', 'themeToggle', 'themeMenu', 'searchInput', 'searchCount', 'searchClear', 'paletteGrid', 'modeSeg', 'addForm', 'jobUrl', 'parseBtn',
+  'todoSwitch', 'todoForm', 'todoInput', 'todoDraft', 'todoSuggest', 'todoHint', 'todoScroll', 'todoOpenList', 'todoDoneWrap', 'themeToggle', 'themeMenu', 'searchInput', 'searchCount', 'searchClear', 'paletteGrid', 'modeSeg', 'addForm', 'jobUrl', 'parseBtn',
   'addPanel', 'addPanelUrl', 'parseConfidence', 'parseStatus', 'dupWarning', 'previewForm',
   'titleInput', 'companyInput', 'locationInput', 'cancelPreview', 'saveJob',
   'statOpenValue', 'statOpenSub', 'statAppliedValue', 'statAppliedSub', 'statTodayValue', 'statTodaySub',
@@ -1646,7 +1648,7 @@ els.rowMenu.addEventListener('click', async (e) => {
   if (item.dataset.menu === 'ptop' || item.dataset.menu === 'pbottom') { closeRowMenu(); moveJobToEnd(id, item.dataset.menu === 'ptop'); return; }
   if (item.dataset.menu === 'todo') {
     closeRowMenu();
-    const label = kind === 'company' ? readableText(entry.name) : readableText(entry.company || entry.title || 'Job');
+    const label = tagLabel(entry, kind === 'company' ? 'company' : 'job');
     openTodos({ link: { kind: kind === 'company' ? 'company' : 'job', id, label } });
     return;
   }
@@ -2064,9 +2066,10 @@ function todoItemHtml(t) {
   const meta = [];
   if (t.link_kind && t.link_label) {
     const live = linkTarget(t);
-    const inner = `${coTile(t.link_label, true)}${escapeHtml(t.link_label)}`;
+    const inner = `${coTile(tagCompany(t.link_label, live), true)}<span class="tchip-text">${escapeHtml(t.link_label)}</span>`;
+    const url = live && t.link_kind === 'job' ? safeJobUrl(live.url) : '';
     meta.push(live
-      ? `<button type="button" class="tchip" data-todo-link title="Open ${escapeHtml(t.link_label)}">${inner}</button>`
+      ? `<span class="tchip-wrap"><button type="button" class="tchip" data-todo-link title="Go to this ${t.link_kind === 'company' ? 'company' : 'job'}">${inner}</button>${url ? `<a class="tchip-out" href="${escapeHtml(url)}" target="_blank" rel="noopener" title="Open the job posting" aria-label="Open the job posting">↗</a>` : ''}</span>`
       : `<span class="tchip gone" title="This ${t.link_kind} was removed">${inner}</span>`);
   }
   const due = !t.done && dueInfo(t.due_on);
@@ -2109,7 +2112,7 @@ function renderTodos() {
   }).join('');
   const d = state.todoDraftLink;
   els.todoDraft.classList.toggle('hidden', !d);
-  els.todoDraft.innerHTML = d ? `<span class="tchip">${coTile(d.label, true)}${escapeHtml(d.label)}<button type="button" class="tdraft-x" data-todo-draft-clear aria-label="Don’t link ${escapeHtml(d.label)}">×</button></span>` : '';
+  els.todoDraft.innerHTML = d ? `<span class="tchip">${coTile(tagCompany(d.label, entryOf(d.id, d.kind)), true)}<span class="tchip-text">${escapeHtml(d.label)}</span><button type="button" class="tdraft-x" data-todo-draft-clear aria-label="Don’t link ${escapeHtml(d.label)}">×</button></span>` : '';
   if (state.todoDrag || state.todoEditing) return; // don't rebuild the list under the pointer or the edit box
 
   if (!state.todosLoaded) { els.todoOpenList.innerHTML = '<li class="tempty">Loading…</li>'; els.todoDoneWrap.innerHTML = ''; return; }
@@ -2143,6 +2146,7 @@ function closeTodos() {
   if (state.todoEditing) finishTodoEdit(true);
   state.todoOpen = false;
   state.todoDraftLink = null;
+  closeTagSuggest(); els.todoHint.classList.add('hidden');
   els.todoBackdrop.classList.add('hidden');
   els.todoDrawer.classList.add('hidden');
   closeRowMenu();
@@ -2168,6 +2172,8 @@ function addTodo() {
   state.todos.push(item);
   els.todoInput.value = '';
   state.todoDraftLink = null;
+  state.todoHintOff = '';
+  closeTagSuggest(); renderTodoHint();
   render();
   const run = api('todos', { method: 'POST', body: JSON.stringify({ ...item, pending: undefined }) });
   state.inflight.set(item.id, run);
@@ -2383,10 +2389,156 @@ async function deleteTodo(id) {
   });
 }
 
+
+/* ---------- Tagging a job or company in a to-do ---------- */
+// All matching runs on the jobs and companies already loaded in the browser. No AI, no extra requests.
+const STAGE_NAME = { open: 'To apply', networking: 'Networking', history: 'History' };
+const STAGE_RANK = { open: 0, networking: 1, history: 2 };
+function tagLabel(entry, kind) {
+  if (kind === 'company') return readableText(entry.name || 'Company').slice(0, 120);
+  const co = readableText(entry.company || ''), title = readableText(entry.title || '');
+  return (co && title ? `${co} · ${title}` : co || title || 'Job').slice(0, 120);
+}
+function tagCompany(label, live) {
+  if (live) return live.company || live.name || label;
+  return String(label || '').split(' · ')[0];
+}
+function tagCandidates(query) {
+  const terms = normText(query).split(' ').filter(Boolean);
+  const jobs = state.jobs.map((j) => ({ kind: 'job', entry: j, s: terms.length ? searchScore([j.company, j.title, j.location], terms) : 1, rank: STAGE_RANK[stageOf(j)] }));
+  const cos = state.companies.map((c) => ({ kind: 'company', entry: c, s: terms.length ? searchScore([c.name, c.source], terms) : 1, rank: 3 }));
+  return [...jobs, ...cos].filter((x) => x.s)
+    .sort((a, b) => b.s - a.s || a.rank - b.rank || new Date(b.entry.updated_at || b.entry.added_at || 0) - new Date(a.entry.updated_at || a.entry.added_at || 0))
+    .slice(0, 6);
+}
+// The @word being typed right before the cursor, if any.
+function tagQueryAtCursor() {
+  const el = els.todoInput;
+  const upto = el.value.slice(0, el.selectionStart ?? el.value.length);
+  const m = upto.match(/(?:^|\s)@([^@\n]{0,40})$/);
+  return m ? { start: upto.length - m[1].length - 1, query: m[1] } : null;
+}
+function renderTagSuggest() {
+  const sg = state.todoSuggest;
+  const open = !!sg;
+  els.todoSuggest.classList.toggle('hidden', !open);
+  els.todoInput.setAttribute('aria-expanded', String(open));
+  if (!open) { els.todoInput.removeAttribute('aria-activedescendant'); return; }
+  if (!sg.items.length) {
+    els.todoSuggest.innerHTML = `<li class="tsg-empty">${state.jobs.length || state.companies.length ? 'No job or company matches' : 'Loading jobs…'}</li>`;
+    return;
+  }
+  els.todoSuggest.innerHTML = sg.items.map((x, i) => {
+    const e = x.entry;
+    const name = x.kind === 'company' ? e.name : e.company;
+    const main = x.kind === 'company' ? displayHtml(e.name) : displayHtml(e.title || 'Untitled role');
+    const sub = x.kind === 'company' ? 'Tracked company' : `${displayHtml(e.company || 'Unknown company')} · ${STAGE_NAME[stageOf(e)]}`;
+    return `<li id="tsg-${i}" role="option" class="tsg${i === sg.index ? ' on' : ''}" aria-selected="${i === sg.index}" data-tag-i="${i}">${coTile(name || '?', true)}<span class="tsg-text"><span class="tsg-main">${main}</span><span class="tsg-sub">${sub}</span></span></li>`;
+  }).join('');
+  els.todoInput.setAttribute('aria-activedescendant', `tsg-${sg.index}`);
+}
+function updateTagSuggest() {
+  const at = tagQueryAtCursor();
+  if (!at) { closeTagSuggest(); return; }
+  const prev = state.todoSuggest;
+  state.todoSuggest = { start: at.start, query: at.query, items: tagCandidates(at.query), index: prev && prev.query === at.query ? prev.index : 0 };
+  renderTagSuggest();
+}
+function closeTagSuggest() { if (state.todoSuggest) { state.todoSuggest = null; renderTagSuggest(); } }
+function pickTag(i) {
+  const sg = state.todoSuggest;
+  const x = sg && sg.items[i];
+  if (!x) return;
+  const el = els.todoInput;
+  const end = el.selectionStart ?? el.value.length;
+  const before = el.value.slice(0, sg.start).replace(/\s+$/, '');
+  const after = el.value.slice(end).replace(/^\s+/, '');
+  el.value = before && after ? `${before} ${after}` : before || after;
+  const caret = before.length + (before && after ? 1 : 0);
+  el.setSelectionRange(caret, caret);
+  state.todoDraftLink = { kind: x.kind, id: x.entry.id, label: tagLabel(x.entry, x.kind) };
+  closeTagSuggest();
+  renderTodos();
+  renderTodoHint();
+  el.focus();
+}
+// Auto-spot: the text mentions a company we know, so offer to link it.
+function spottedTag() {
+  if (state.todoDraftLink || state.todoSuggest) return null;
+  const text = ` ${normText(els.todoInput.value)} `;
+  if (text.trim().length < 3) return null;
+  let best = null;
+  const consider = (name, kind, entry) => {
+    const key = normText(name).replace(/\b(inc|llc|ltd|corp|co|corporation|company)\b/g, '').trim();
+    if (key.length < 3 || !text.includes(` ${key} `)) return;
+    const rank = kind === 'company' ? 3 : STAGE_RANK[stageOf(entry)];
+    if (!best || key.length > best.key.length || (key.length === best.key.length && rank < best.rank)) best = { key, kind, entry, rank };
+  };
+  state.jobs.forEach((j) => consider(j.company, 'job', j));
+  state.companies.forEach((c) => consider(c.name, 'company', c));
+  if (!best || best.key === state.todoHintOff) return null;
+  const more = best.kind === 'job' ? state.jobs.filter((j) => j !== best.entry && normText(j.company).includes(best.key)).length : 0;
+  return { ...best, more };
+}
+function renderTodoHint() {
+  const h = spottedTag();
+  els.todoHint.classList.toggle('hidden', !h);
+  if (!h) { els.todoHint.innerHTML = ''; delete els.todoHint.dataset.id; return; }
+  els.todoHint.dataset.id = h.entry.id; els.todoHint.dataset.kind = h.kind; els.todoHint.dataset.key = h.key;
+  const label = tagLabel(h.entry, h.kind);
+  els.todoHint.innerHTML = `<button type="button" class="thint-go" data-hint-link>${coTile(h.kind === 'company' ? h.entry.name : h.entry.company, true)}<span>Link to <b>${escapeHtml(label)}</b>?</span></button>${h.more ? `<span class="thint-more">${h.more} more · type @</span>` : ''}<button type="button" class="thint-x" data-hint-off aria-label="Don’t link">×</button>`;
+}
+els.todoHint.addEventListener('click', (e) => {
+  const { id, kind, key } = els.todoHint.dataset;
+  if (e.target.closest('[data-hint-off]')) { state.todoHintOff = key; renderTodoHint(); els.todoInput.focus(); return; }
+  if (e.target.closest('[data-hint-link]')) {
+    const entry = entryOf(id, kind);
+    if (entry) state.todoDraftLink = { kind, id, label: tagLabel(entry, kind) };
+    renderTodos(); renderTodoHint(); els.todoInput.focus();
+  }
+});
+els.todoInput.addEventListener('input', () => { updateTagSuggest(); renderTodoHint(); });
+els.todoInput.addEventListener('click', updateTagSuggest);
+els.todoInput.addEventListener('blur', () => setTimeout(() => { if (document.activeElement !== els.todoInput) closeTagSuggest(); }, 120));
+els.todoInput.addEventListener('keydown', (e) => {
+  const sg = state.todoSuggest;
+  if (!sg) return;
+  const n = sg.items.length;
+  if (e.key === 'ArrowDown' && n) { e.preventDefault(); sg.index = (sg.index + 1) % n; renderTagSuggest(); }
+  else if (e.key === 'ArrowUp' && n) { e.preventDefault(); sg.index = (sg.index - 1 + n) % n; renderTagSuggest(); }
+  else if (e.key === 'Tab' && n) { e.preventDefault(); pickTag(sg.index); }
+  else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeTagSuggest(); }
+}, true);
+els.todoSuggest.addEventListener('mousedown', (e) => {
+  const li = e.target.closest('[data-tag-i]');
+  if (!li) return;
+  e.preventDefault(); // keep focus in the box
+  pickTag(Number(li.dataset.tagI));
+});
+
+// Clicking a tagged to-do takes you to that row: right tab, filters cleared, scrolled into view, flashed.
+function jumpToRow(id, kind) {
+  const entry = entryOf(id, kind);
+  if (!entry) return;
+  if (state.query) { state.query = ''; els.searchInput.value = ''; els.searchClear.classList.add('hidden'); }
+  const tab = kind === 'company' ? 'companies' : stageOf(entry);
+  if (!ownerMatch(entry)) { state.ownerFilter = 'all'; store.set('jobSprintOwnerFilter', 'all'); }
+  if (kind === 'company') state.companyFilter = 'all';
+  if (tab === 'history') state.historyFilter = 'all';
+  setView(tab);
+  requestAnimationFrame(() => {
+    const row = els.jobList.querySelector(`.job-row[data-id="${CSS.escape(id)}"]`);
+    if (!row) return;
+    row.scrollIntoView({ block: 'center', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+    row.classList.remove('flash'); void row.offsetWidth; row.classList.add('flash');
+    setTimeout(() => row.classList.remove('flash'), 2200);
+  });
+}
+
 els.todoBtn.addEventListener('click', () => (state.todoOpen ? closeTodos() : openTodos()));
 els.closeTodo.addEventListener('click', closeTodos);
 els.todoBackdrop.addEventListener('click', closeTodos);
-els.todoForm.addEventListener('submit', (e) => { e.preventDefault(); addTodo(); });
+els.todoForm.addEventListener('submit', (e) => { e.preventDefault(); if (state.todoSuggest && state.todoSuggest.items.length) { pickTag(state.todoSuggest.index); return; } addTodo(); });
 els.todoInput.addEventListener('keydown', (e) => {
   if (e.key === 'Backspace' && !els.todoInput.value && state.todoDraftLink) { state.todoDraftLink = null; renderTodos(); }
 });
@@ -2422,7 +2574,7 @@ els.todoScroll.addEventListener('click', (e) => {
     const kind = t.link_kind === 'company' ? 'company' : 'job';
     if (!linkTarget(t)) return;
     closeTodos();
-    openNotes(t.link_id, kind);
+    jumpToRow(t.link_id, kind);
     return;
   }
   if (e.target.closest('a')) return; // links inside the text open normally
