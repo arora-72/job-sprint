@@ -25,6 +25,7 @@ const state = {
   tab: 'open',          // 'open' | 'networking' | 'history' | 'discover'
   filter: null,         // null | 'today' | 'backlog' | 'applied-today'
   historyFilter: 'all', // 'all' | 'successful' | 'stale' | 'blocked'
+  holdOnly: false,      // To apply: show only jobs on hold
   notesJobId: null,     // id of the job or company whose drawer is open
   notesKind: 'job',     // 'job' | 'company'
   companies: [],
@@ -416,6 +417,22 @@ function ageBadge(job) {
   return `<span class="age ${age >= 5 ? 'old' : ''}" title="Added ${age} day${age === 1 ? '' : 's'} ago">${age}d</span>`;
 }
 
+// On hold: still in To apply, paused while waiting on a referral or coffee chats.
+const HOLD_NUDGE_DAYS = 2;
+const HOLD_REASONS = ['Asked for referral', 'Coffee chats in progress', 'Waiting on contact'];
+const PAUSE_ICON = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1.2"/><rect x="14" y="5" width="4" height="14" rx="1.2"/></svg>';
+function isHeld(job) { return job.status === 'pipeline' && !!job.hold_since; }
+function holdDays(job) { return Math.max(0, daysOld(job.hold_since)); }
+function holdNudge(job) { return isHeld(job) && holdDays(job) >= HOLD_NUDGE_DAYS; }
+function holdPill(job) {
+  if (!isHeld(job)) return '';
+  const days = holdDays(job);
+  const nudge = holdNudge(job);
+  const age = days === 0 ? 'today' : `${days}d`;
+  const title = `On hold since ${relDate(job.hold_since)}${job.hold_by ? ` (${job.hold_by})` : ''}${nudge ? '. Time to follow up.' : ''} Click to change or resume.`;
+  return `<button type="button" class="hold-pill${nudge ? ' nudge' : ''}" data-action="hold-menu" title="${escapeHtml(title)}">${PAUSE_ICON}<span class="hold-word">On hold</span><span class="hold-reason">${escapeHtml(readableText(job.hold_reason || ''))}</span><span class="hold-age">${age}${nudge ? ' · follow up?' : ''}</span></button>`;
+}
+
 const NOTE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
 
 // Company recognition: a colored tile with initials (same company, same color, everywhere) and a bold name.
@@ -476,7 +493,7 @@ function prioCell(job, rank) {
   return `<span class="prio"><button type="button" class="pgrip" data-prio-grip aria-label="${escapeHtml(label)}" title="Drag to reorder">${GRIP_ICON}</button><span class="rank${ranked ? (rank <= 3 ? ' top' : '') : ' none'}" aria-hidden="true">${rank}</span></span>`;
 }
 function openRow(job, rank) {
-  const cls = rank === undefined ? '' : rank === '–' ? ' torank-row' : ' ranked-row';
+  const cls = (rank === undefined ? '' : rank === '–' ? ' torank-row' : ' ranked-row') + (isHeld(job) ? ` held${holdNudge(job) ? ' held-nudge' : ''}` : '');
   return `
     <article class="job-row${cls}" data-id="${escapeHtml(job.id)}">
       <div class="job-main">
@@ -486,6 +503,7 @@ function openRow(job, rank) {
         <div class="job-text">
           ${titleLink(job)}
           <div class="job-sub">${subLine(job)}${companyBadge(job)}</div>
+          ${holdPill(job)}
           ${notePreview(job)}
         </div>
       </div>
@@ -497,7 +515,7 @@ function openRow(job, rank) {
       <div class="actions">
         ${notesButton(job)}
         ${openLink(job)}
-        <button class="btn secondary small" data-action="block">Block</button>
+        ${isHeld(job) ? '<button class="btn secondary small resume-btn" data-action="unhold" title="Take off hold">Resume</button>' : '<button class="btn secondary small" data-action="block">Block</button>'}
         <button class="btn primary small" data-action="apply">Applied ✓</button>
         ${menuButton()}
       </div>
@@ -638,7 +656,9 @@ function plural(n, word, many) { return `${n} ${n === 1 ? word : (many || `${wor
 
 function renderTiles(b) {
   els.statOpenValue.textContent = b.open.length;
-  els.statOpenSub.textContent = b.open.length ? `${b.today.length} new · ${b.backlog.length} backlog` : 'Nothing open';
+  const held = b.open.filter(isHeld).length;
+  const backlog = b.backlog.filter((j) => !isHeld(j));
+  els.statOpenSub.textContent = b.open.length ? `${b.today.length} new · ${backlog.length} backlog${held ? ` · ${held} on hold` : ''}` : 'Nothing open';
 
   els.statAppliedValue.textContent = b.appliedToday.length;
   const split = USERS.map((u) => [u, b.appliedToday.filter((j) => j.applied_by === u).length]).filter(([, n]) => n);
@@ -647,14 +667,17 @@ function renderTiles(b) {
   els.statTodayValue.textContent = b.today.length;
   els.statTodaySub.textContent = b.addedToday.length ? `of ${b.addedToday.length} added today` : 'Nothing added today';
 
-  els.statBacklogValue.textContent = b.backlog.length;
-  els.statBacklog.classList.toggle('is-alert', b.backlog.length > 0);
-  els.statBacklog.classList.toggle('is-clear', b.backlog.length === 0);
-  if (b.backlog.length) {
-    const oldest = daysOld(b.backlog[0].added_at);
-    els.statBacklogSub.textContent = `Clear first · oldest ${oldest} day${oldest === 1 ? '' : 's'}`;
+  // Jobs on hold are waiting on someone else, so they don't count as overdue backlog.
+  const heldBacklog = b.backlog.length - backlog.length;
+  els.statBacklogValue.textContent = backlog.length;
+  els.statBacklog.classList.toggle('is-alert', backlog.length > 0);
+  els.statBacklog.classList.toggle('is-clear', backlog.length === 0);
+  const onHold = heldBacklog ? ` · ${heldBacklog} on hold` : '';
+  if (backlog.length) {
+    const oldest = daysOld(backlog[0].added_at);
+    els.statBacklogSub.textContent = `Clear first · oldest ${oldest} day${oldest === 1 ? '' : 's'}${onHold}`;
   } else {
-    els.statBacklogSub.textContent = 'All clear from earlier days';
+    els.statBacklogSub.textContent = heldBacklog ? `All clear${onHold}` : 'All clear from earlier days';
   }
 
   const net = b.networking;
@@ -680,6 +703,11 @@ function prioLists(b) {
   };
 }
 function renderOpen(b) {
+  if (state.holdOnly) {
+    const held = b.open.filter(isHeld).sort((x, y) => new Date(x.hold_since) - new Date(y.hold_since));
+    if (!held.length) return { empty: ['✓', 'Nothing on hold', 'Use ⋯ → Put on hold… on a job you’re waiting on.', true] };
+    return { html: group(`On hold · ${held.length}`, `Longest waiting first · follow up after ${HOLD_NUDGE_DAYS} days`, 'onhold', held.map((j) => openRow(j)).join('')) };
+  }
   if (state.openView === 'priority') {
     const { torank, ranked } = prioLists(b);
     if (!torank.length && !ranked.length) return renderOpenDate(b);
@@ -1034,6 +1062,12 @@ function tabBase() {
   if (state.tab === 'companies') return state.companies;
   return state.jobs.filter((j) => stageOf(j) === state.tab);
 }
+function holdChip(base) {
+  const n = base.filter((j) => ownerMatch(j) && isHeld(j)).length;
+  if (!n && !state.holdOnly) return '';
+  const nudge = base.some((j) => ownerMatch(j) && holdNudge(j));
+  return `<button class="subfilter hold-chip${state.holdOnly ? ' active' : ''}${nudge ? ' nudge' : ''}" data-hold-only aria-pressed="${state.holdOnly}" title="Show only jobs on hold">${PAUSE_ICON}On hold <span>${n}</span></button>`;
+}
 function renderOwnerBar() {
   const base = tabBase();
   els.ownerBar.classList.toggle('hidden', !base);
@@ -1041,12 +1075,13 @@ function renderOwnerBar() {
   els.ownerBar.innerHTML = `<span class="owner-label">Owner</span>${OWNER_FILTERS.map(([key, label]) => {
     const n = key === 'all' ? base.length : key === 'none' ? base.filter((x) => !x.assigned_to).length : base.filter((x) => x.assigned_to === key).length;
     return `<button class="subfilter${key === state.ownerFilter ? ' active' : ''}" data-owner-filter="${key}" aria-pressed="${key === state.ownerFilter}">${label} <span>${n}</span></button>`;
-  }).join('')}${state.tab === 'open' ? `<div class="view-toggle" role="group" aria-label="Order the list by">${[
+  }).join('')}${state.tab === 'open' ? holdChip(base) : ''}${state.tab === 'open' ? `<div class="view-toggle" role="group" aria-label="Order the list by">${[
     ['priority', 'Priority', '<path d="M4 7h11M4 12h8M4 17h5M18 5v14M15 16l3 3 3-3"/>'],
     ['date', 'Date added', '<rect x="3.5" y="5" width="17" height="15" rx="3"/><path d="M8 3v4M16 3v4M3.5 10h17"/>'],
   ].map(([key, label, icon]) => `<button type="button" class="${state.openView === key ? 'on' : ''}" data-open-view="${key}" aria-pressed="${state.openView === key}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icon}</svg>${label}</button>`).join('')}</div>` : ''}`;
 }
 els.ownerBar.addEventListener('click', (e) => {
+  if (e.target.closest('[data-hold-only]')) { state.holdOnly = !state.holdOnly; render(); return; }
   const v = e.target.closest('[data-open-view]');
   if (v) {
     state.openView = v.dataset.openView;
@@ -1180,6 +1215,7 @@ function render() {
 
 function setView(tab, filter = null) {
   const changed = state.tab !== tab;
+  if (changed || filter) state.holdOnly = false;
   state.tab = tab;
   state.filter = filter;
   render();
@@ -1450,7 +1486,12 @@ els.jobList.addEventListener('click', (e) => {
   if (!job) return;
   const action = btn.dataset.action;
   if (action === 'notes') { openNotes(id); return; }
+  if (action === 'hold-menu') {
+    if (els.rowMenu.dataset.id === id && !els.rowMenu.classList.contains('hidden')) closeRowMenu(); else openHoldMenu(id, btn);
+    return;
+  }
   if (!state.user) return chooseUser();
+  if (action === 'unhold') { resumeJob(id); return; }
   if (action === 'apply') {
     setStatus(id, 'applied');
     const today = buckets().appliedToday.length;
@@ -1610,8 +1651,57 @@ function openRowMenu(id, kind, anchor, point) {
   const prio = kind === 'job' && state.openView === 'priority' && stageOf(entry) === 'open'
     ? '<button role="menuitem" class="menu-item" data-menu="ptop">Move to top</button><button role="menuitem" class="menu-item" data-menu="pbottom">Move to bottom</button><div class="menu-sep"></div>'
     : '';
-  showRowMenu(id, kind, `${prio}${items}<button role="menuitem" class="menu-item" data-menu="todo">Add to-do…</button><button role="menuitem" class="menu-item danger" data-menu="delete">Delete…</button>`, anchor, point);
+  const hold = kind === 'job' && stageOf(entry) === 'open'
+    ? (isHeld(entry)
+      ? '<button role="menuitem" class="menu-item" data-menu="hold-pick">Change hold reason…</button><button role="menuitem" class="menu-item" data-menu="unhold">Resume (take off hold)</button><button role="menuitem" class="menu-item" data-menu="block">Block…</button><div class="menu-sep"></div>'
+      : '<button role="menuitem" class="menu-item" data-menu="hold-pick">Put on hold…</button><div class="menu-sep"></div>')
+    : '';
+  showRowMenu(id, kind, `${prio}${hold}${items}<button role="menuitem" class="menu-item" data-menu="todo">Add to-do…</button><button role="menuitem" class="menu-item danger" data-menu="delete">Delete…</button>`, anchor, point);
 }
+function openHoldMenu(id, anchor, point) {
+  const job = entryOf(id, 'job');
+  if (!job) return;
+  const current = isHeld(job) ? job.hold_reason : '';
+  const custom = current && !HOLD_REASONS.includes(current) ? current : '';
+  showRowMenu(id, 'job', `<div class="menu-title">${current ? 'Change hold reason' : 'Put on hold: why?'}</div>${HOLD_REASONS.map((r) => `<button role="menuitem" class="menu-item${r === current ? ' current' : ''}" data-menu="hold" data-reason="${escapeHtml(r)}">${escapeHtml(r)}${r === current ? '<span class="menu-check" aria-hidden="true">✓</span>' : ''}</button>`).join('')}
+    <form class="hold-own" data-hold-form><input type="text" maxlength="120" placeholder="Or type your own reason" aria-label="Your own reason" value="${escapeHtml(custom)}" /><button type="submit" class="btn primary small">Save</button></form>
+    ${current ? '<div class="menu-sep"></div><button role="menuitem" class="menu-item" data-menu="unhold">Resume (take off hold)</button>' : ''}`, anchor, point);
+}
+function putOnHold(id, reason, restore = null) {
+  const job = entryOf(id, 'job');
+  if (!job || !state.user) return;
+  const prev = isHeld(job) ? { reason: job.hold_reason, since: job.hold_since, by: job.hold_by } : null;
+  const now = new Date().toISOString();
+  const local = restore
+    ? { hold_reason: reason, hold_since: restore.since, hold_by: restore.by, updated_at: now }
+    : (j) => ({ hold_reason: reason, hold_since: now, hold_by: state.user, updated_at: now, notes: [...notesOf(j), { id: `tmp-${now}`, text: `On hold: ${reason}`, by: state.user, at: now, pending: true }] });
+  const run = mutate(id, local, { action: 'hold', hold_reason: reason, ...(restore ? { restore } : {}) });
+  if (restore) return;
+  // Undo also removes the "On hold: …" note this added.
+  const dropNote = () => run.then((res) => {
+    const noteId = res && res.note && res.note.id;
+    if (noteId) mutate(id, (j) => ({ notes: notesOf(j).filter((n) => n.id !== noteId) }), { action: 'delete-note', note_id: noteId });
+  }).catch(() => {});
+  showToast(`On hold (${reason}): ${jobLabel(job)}`, { undo: () => { if (prev) putOnHold(id, prev.reason, { since: prev.since, by: prev.by }); else resumeJob(id, true); dropNote(); } });
+}
+function resumeJob(id, quiet = false) {
+  const job = entryOf(id, 'job');
+  if (!job || !isHeld(job)) return;
+  const prev = { reason: job.hold_reason, since: job.hold_since, by: job.hold_by };
+  mutate(id, { hold_reason: null, hold_since: null, hold_by: null, updated_at: new Date().toISOString() }, { action: 'unhold' });
+  if (!quiet) showToast(`Back in play: ${jobLabel(job)}`, { undo: () => putOnHold(id, prev.reason, { since: prev.since, by: prev.by }) });
+}
+els.rowMenu.addEventListener('submit', (e) => {
+  const form = e.target.closest('[data-hold-form]');
+  if (!form) return;
+  e.preventDefault();
+  const reason = form.querySelector('input').value.replace(/\s+/g, ' ').trim();
+  if (!reason) { form.querySelector('input').focus(); return; }
+  const id = els.rowMenu.dataset.id;
+  closeRowMenu();
+  if (!state.user) { chooseUser(); return; }
+  putOnHold(id, reason);
+});
 function openOwnerMenu(id, kind, anchor) {
   const entry = entryOf(id, kind);
   if (!entry) return;
@@ -1653,6 +1743,10 @@ els.rowMenu.addEventListener('click', async (e) => {
     return;
   }
   if (item.dataset.menu === 'assign') { closeRowMenu(); assignOwner(id, kind, item.dataset.owner || null); return; }
+  if (item.dataset.menu === 'hold-pick') { const r = els.rowMenu.getBoundingClientRect(); openHoldMenu(id, null, { x: r.left, y: r.top }); return; }
+  if (item.dataset.menu === 'hold') { closeRowMenu(); if (!state.user) { chooseUser(); return; } if (entry.hold_reason !== item.dataset.reason || !isHeld(entry)) putOnHold(id, item.dataset.reason); return; }
+  if (item.dataset.menu === 'unhold') { closeRowMenu(); if (!state.user) { chooseUser(); return; } resumeJob(id); return; }
+  if (item.dataset.menu === 'block') { closeRowMenu(); if (!state.user) { chooseUser(); return; } openBlockModal(entry); return; }
   if (item.dataset.menu === 'open') { closeRowMenu(); openNotes(id, 'company'); return; }
   if (item.dataset.menu === 'copy') {
     closeRowMenu();
@@ -1673,7 +1767,7 @@ els.rowMenu.addEventListener('keydown', (e) => {
   items[(i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length].focus();
 });
 document.addEventListener('mousedown', (e) => {
-  if (!els.rowMenu.classList.contains('hidden') && !e.target.closest('#rowMenu, .menu-btn, .own, .tmenu')) closeRowMenu();
+  if (!els.rowMenu.classList.contains('hidden') && !e.target.closest('#rowMenu, .menu-btn, .own, .tmenu, .hold-pill')) closeRowMenu();
 });
 window.addEventListener('resize', closeRowMenu);
 window.addEventListener('scroll', closeRowMenu, true);

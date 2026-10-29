@@ -999,3 +999,27 @@ mark { background: var(--amber-bg); color: inherit; border-radius: 3px; box-shad
 @keyframes rowflash { 0%, 30% { box-shadow: inset 0 0 0 2px var(--accent); background: var(--accent-soft); } 100% { box-shadow: inset 0 0 0 2px transparent; } }
 .job-row.flash { animation: rowflash 2s ease-out; }
 @media (prefers-reduced-motion: reduce) { .job-row.flash { animation: none; box-shadow: inset 0 0 0 2px var(--accent); } }
+
+/* ---------- On hold ---------- */
+:root { --hold-bg: color-mix(in srgb, var(--amber-bg) 75%, var(--surface)); --hold-edge: var(--amber); }
+.job-row.held { background: var(--hold-bg); box-shadow: inset 4px 0 0 var(--hold-edge); }
+.job-row.held:hover { background: color-mix(in srgb, var(--amber-bg) 95%, var(--surface)); }
+.job-row.held-nudge { --hold-bg: var(--amber-bg); }
+.hold-pill { display: inline-block; max-width: 100%; margin-top: 6px; padding: 3px 10px 3px 8px; border-radius: 10px; border: 1px solid var(--amber-line); background: var(--surface); color: var(--amber); font-size: 12px; line-height: 1.35; font-weight: 600; cursor: pointer; text-align: left; white-space: normal; }
+.hold-pill svg { width: 10px; height: 10px; margin-right: 5px; vertical-align: -1px; }
+.hold-pill .hold-word { font-weight: 700; }
+.hold-pill .hold-reason { color: var(--text-2); font-weight: 500; }
+.hold-pill .hold-reason::before, .hold-pill .hold-age::before { content: ' · '; color: var(--text-3); }
+.hold-pill .hold-age { color: var(--text-3); font-weight: 600; white-space: nowrap; }
+.hold-pill:hover { border-color: var(--amber); }
+.hold-pill:focus-visible { outline: 2px solid var(--amber); outline-offset: 1px; }
+.hold-pill.nudge { background: var(--amber); border-color: var(--amber); color: var(--surface); }
+.hold-pill.nudge .hold-reason, .hold-pill.nudge .hold-age, .hold-pill.nudge .hold-reason::before, .hold-pill.nudge .hold-age::before { color: var(--surface); }
+.resume-btn { border-color: var(--amber-line); color: var(--amber); }
+.hold-chip { display: inline-flex; align-items: center; gap: 5px; }
+.hold-chip svg { width: 10px; height: 10px; color: var(--amber); }
+.hold-chip.nudge:not(.active) { border-color: var(--amber-line); }
+.hold-chip.active svg { color: currentColor; }
+.group-head.onhold { background: var(--amber-bg); color: var(--amber); }
+.hold-own { display: flex; gap: 6px; padding: 6px 6px 4px; }
+.hold-own input { flex: 1; min-width: 0; padding: 6px 9px; font-size: 13px; border-radius: 8px; background: var(--sunken); }

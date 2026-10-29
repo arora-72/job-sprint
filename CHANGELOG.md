@@ -4,6 +4,15 @@ Changes to Job Sprint are recorded here. The initial Git snapshot is `v1.0.0`. E
 
 ## Unreleased
 
+### On hold (To apply)
+
+- Put a To apply job **on hold** when you're waiting on something before applying: ⋯ → **Put on hold…**, then pick *Asked for referral*, *Coffee chats in progress*, *Waiting on contact*, or type your own reason. The reason is also logged in the job's notes.
+- The job stays in the same list and keeps its priority spot. The row turns soft yellow with an amber edge and a pill: "On hold · reason · 1d". After **2 days** the pill turns solid amber and says "follow up?".
+- **Resume** replaces Block on held rows (Block moves to ⋯). Clicking the pill changes the reason or resumes. Clicking **Applied** moves it to Networking as usual. Hold, Resume and reason changes all have Undo.
+- An **On hold** chip next to the owner filter shows only held jobs, longest waiting first.
+- The Backlog tile no longer counts held jobs as overdue and shows "· N on hold" instead.
+- Database: three new columns on jobs (`supabase/hold.sql`), with a backup first (`backup.jobs_before_hold`).
+
 ### Tag jobs in to-dos
 
 - Type **@** in the to-do box to tag a job or company. A dropdown suggests matches by role or company as you type (open roles first), with the tab each one is in. Arrow keys + Enter or Tab, or click, to pick. The @text is removed and the job shows as a chip.

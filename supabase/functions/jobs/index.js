@@ -5,6 +5,7 @@ const NETWORK_STATUSES = ['not_networked', 'first_pass', 'second_pass', 'success
 const NOTE_MAX_CHARS = 1000;
 const NOTE_MAX_COUNT = 200;
 const NOTE_RETRIES = 3;
+const HOLD_REASON_MAX = 120;
 
 const json = (statusCode, body) => ({ statusCode, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }, body: JSON.stringify(body) });
 const bad = (message) => json(400, { error: message });
@@ -18,7 +19,7 @@ const CLEARED_NETWORK = {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const JOB_COLUMNS = ['id', 'company', 'title', 'location', 'url', 'status', 'added_by', 'added_at', 'applied_by', 'applied_at',
   'blocked_by', 'blocked_at', 'blocked_reason', 'assigned_to', 'network_status', 'network_updated_by', 'network_updated_at',
-  'network_closed_by', 'network_closed_at', 'notes', 'priority', 'updated_at'];
+  'network_closed_by', 'network_closed_at', 'notes', 'priority', 'hold_reason', 'hold_since', 'hold_by', 'updated_at'];
 
 const isPriority = (v) => typeof v === 'number' && Number.isFinite(v) && Math.abs(v) < 1e12;
 
@@ -42,6 +43,8 @@ function cleanRestoredJob(row) {
   if (out.blocked_reason !== undefined && !str(out.blocked_reason, 500)) return { error: 'Invalid reason.' };
   if (out.notes !== undefined && (!Array.isArray(out.notes) || out.notes.length > NOTE_MAX_COUNT)) return { error: 'Invalid notes.' };
   if (out.priority != null && !isPriority(out.priority)) return { error: 'Invalid priority.' };
+  if (out.hold_reason != null && !str(out.hold_reason, HOLD_REASON_MAX)) return { error: 'Invalid hold reason.' };
+  if (!when(out.hold_since) || !who(out.hold_by)) return { error: 'Invalid hold.' };
   return { row: out };
 }
 
@@ -82,16 +85,16 @@ function statusPatch({ status, actor, blocked_reason = '' }, now) {
 
 // Notes are a JSON array on the job. Two people can add notes at the same moment, so writes
 // only succeed if the row hasn't changed since it was read, and retry otherwise.
-async function updateNotes(id, change) {
+async function updateNotes(id, change, extra = null) {
   for (let attempt = 0; attempt < NOTE_RETRIES; attempt += 1) {
-    const rows = await supabase(`${byId(id)}&select=notes,updated_at`);
+    const rows = await supabase(`${byId(id)}&select=notes,status,updated_at`);
     const current = rows?.[0];
     if (!current) return { error: json(404, { error: 'Job not found.' }) };
     const notes = Array.isArray(current.notes) ? current.notes : [];
-    const next = change(notes);
+    const next = change(notes, current);
     if (next.error) return next;
     const now = new Date().toISOString();
-    const job = await patchJob(`${byId(id)}&updated_at=eq.${encodeURIComponent(current.updated_at)}`, { notes: next.notes, updated_at: now });
+    const job = await patchJob(`${byId(id)}&updated_at=eq.${encodeURIComponent(current.updated_at)}`, { notes: next.notes, ...(extra || {}), updated_at: now });
     if (job) return { job };
   }
   return { error: json(409, { error: 'Someone else just edited this job. Try again.' }) };
@@ -147,6 +150,31 @@ async function handlePatch(body) {
   if (action === 'priority') {
     if (body.priority !== null && !isPriority(body.priority)) return bad('Invalid priority.');
     const job = await patchJob(byId(id), { priority: body.priority });
+    return job ? json(200, { job }) : json(404, { error: 'Job not found.' });
+  }
+
+  // On hold: the job stays in To apply, paused while waiting on a referral or coffee chats.
+  // Putting a job on hold also logs the reason in its notes. Undo of Resume passes the old stamp back.
+  if (action === 'hold') {
+    const reason = typeof body.hold_reason === 'string' ? body.hold_reason.replace(/\s+/g, ' ').trim() : '';
+    if (!reason) return bad('Pick a reason for the hold.');
+    if (reason.length > HOLD_REASON_MAX) return bad(`Hold reasons can be up to ${HOLD_REASON_MAX} characters.`);
+    if (body.restore) {
+      const { since, by } = body.restore;
+      if (!isIsoDate(since) || !USERS.includes(by)) return bad('Invalid undo.');
+      const job = await patchJob(`${byId(id)}&status=eq.pipeline`, { hold_reason: reason, hold_since: since, hold_by: by, updated_at: now });
+      return job ? json(200, { job }) : json(409, { error: 'Only jobs in To apply can be put on hold.' });
+    }
+    const note = { id: crypto.randomUUID(), text: `On hold: ${reason}`, by: actor, at: now };
+    const result = await updateNotes(id, (notes, current) => (current.status !== 'pipeline'
+      ? { error: json(409, { error: 'Only jobs in To apply can be put on hold.' }) }
+      : { notes: notes.length >= NOTE_MAX_COUNT ? notes : [...notes, note] }),
+    { hold_reason: reason, hold_since: now, hold_by: actor });
+    return result.error || json(200, { job: result.job, note });
+  }
+
+  if (action === 'unhold') {
+    const job = await patchJob(byId(id), { hold_reason: null, hold_since: null, hold_by: null, updated_at: now });
     return job ? json(200, { job }) : json(404, { error: 'Job not found.' });
   }
 
