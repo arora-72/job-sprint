@@ -70,9 +70,9 @@
         <button type="button" class="icon-btn" id="closeDocModal" aria-label="Close">×</button>
       </div>
       <label class="dropzone big" id="docDrop">
-        <input type="file" id="docFile" accept="application/pdf,.pdf" />
-        <span class="dz-main" id="docDropText"><b>Drop a PDF</b> here or <u>browse</u></span>
-        <span class="dz-sub">PDF, up to 10 MB</span>
+        <input type="file" id="docFile" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" />
+        <span class="dz-main" id="docDropText"><b>Drop a PDF or Word file</b> here or <u>browse</u></span>
+        <span class="dz-sub">PDF or .docx, up to 10 MB</span>
       </label>
       <label class="field"><span class="field-label">Name <span class="req">required</span></span>
         <input id="docTitle" type="text" maxlength="200" placeholder="e.g. CoS resume, tech focus" />
@@ -353,9 +353,9 @@
       </div>
       <ul id="filesList" class="files-list"></ul>
       <label class="dropzone" id="filesDrop">
-        <input type="file" id="filesInput" accept="application/pdf,.pdf" multiple />
-        <span class="dz-main"><b>Drop a PDF</b> here or <u>browse</u></span>
-        <span class="dz-sub">PDF, up to 10 MB · cover letter, JD, offer…</span>
+        <input type="file" id="filesInput" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" multiple />
+        <span class="dz-main"><b>Drop a PDF or Word file</b> here or <u>browse</u></span>
+        <span class="dz-sub">PDF or .docx, up to 10 MB · cover letter, JD, offer…</span>
       </label>
     </section>
     <form id="noteForm" class="note-form" novalidate>

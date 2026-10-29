@@ -4,6 +4,13 @@ Changes to Job Sprint are recorded here. The initial Git snapshot is `v1.0.0`. E
 
 ## Unreleased
 
+### Word files
+
+- Resumes and job files now accept **Word (.docx)** as well as PDF, up to 10 MB. Word files show a blue tile; PDFs stay red.
+- Browsers can't display Word files, so **Open** on a .docx downloads it with its name (e.g. "CoS resume.docx"). PDFs still open in a new tab.
+- Old .doc files get a clear message to save as .docx or PDF first.
+- Storage: the private bucket now also allows .docx (`supabase/docx.sql`). No table changes.
+
 ### Analytics tab + outcomes
 
 - New **Analytics** tab. Goal: **5 applications a day each**, Monday to Friday (weekends count as a bonus).

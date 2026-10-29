@@ -2792,6 +2792,8 @@ window.addEventListener('focus', refreshIfDue);
 // Files live in a private Supabase Storage bucket. This page only ever sees short-lived links
 // from the `files` function: one to upload a PDF, one to view it.
 const MAX_PDF = 10 * 1024 * 1024;
+const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+const WORD_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M8.5 12.5l1.2 5 1.8-4 1.8 4 1.2-5"/></svg>';
 const ROLE_PRESETS = ['Chief of Staff', 'Operations Management', 'BizOps', 'Strategy & Operations', 'Product Ops'];
 const PDF_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>';
 function resumeDocs() { return state.docs.filter((d) => d.kind === 'resume'); }
@@ -2800,21 +2802,29 @@ function resumeOf(job) { return job.resume_id ? resumeDocs().find((d) => d.id ==
 function fileCount(job) { return jobFiles(job.id).length + (resumeOf(job) ? 1 : 0) + state.uploads.filter((u) => u.job_id === job.id).length; }
 function usedFor(doc) { return state.jobs.filter((j) => j.resume_id === doc.id).length; }
 function fileSize(bytes) { return bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`; }
-function isPdf(file) { return file && (file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '')); }
-function nameFromFile(file) { return (file.name || 'Document').replace(/\.pdf$/i, '').replace(/[_]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200) || 'Document'; }
+function fileTypeOf(file) {
+  if (!file) return null;
+  if (file.type === DOCX_MIME || /\.docx$/i.test(file.name || '')) return 'docx';
+  if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '')) return 'pdf';
+  return null;
+}
+const isDocx = (doc) => doc && doc.file_type === 'docx';
+function fileTile(doc, small = false) { return isDocx(doc) ? `<span class="pdf-tile word${small ? ' sm' : ''}" title="Word document">${WORD_ICON}</span>` : `<span class="pdf-tile${small ? ' sm' : ''}" title="PDF">${PDF_ICON}</span>`; }
+function nameFromFile(file) { return (file.name || 'Document').replace(/\.(pdf|docx)$/i, '').replace(/[_]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200) || 'Document'; }
 function checkPdf(file) {
-  if (!isPdf(file)) return 'Only PDF files can be added.';
+  if (/\.doc$/i.test(file.name || '')) return `${file.name} is an old Word file (.doc). Save it as .docx or PDF first.`;
+  if (!fileTypeOf(file)) return 'Only PDF or Word (.docx) files can be added.';
   if (file.size > MAX_PDF) return `${file.name} is over 10 MB.`;
   if (!file.size) return `${file.name} is empty.`;
   return '';
 }
 
 // PUT the file straight to Storage with a progress bar.
-function putFile(url, file, onProgress) {
+function putFile(url, file, onProgress, type = 'pdf') {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('PUT', url);
-    xhr.setRequestHeader('Content-Type', 'application/pdf');
+    xhr.setRequestHeader('Content-Type', type === 'docx' ? DOCX_MIME : 'application/pdf');
     xhr.setRequestHeader('x-upsert', 'false');
     xhr.setRequestHeader('apikey', API_KEY);
     xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
@@ -2832,8 +2842,8 @@ async function uploadPdf(file, { kind, job_id = null, title, role_tag = null }) 
   state.uploads.push(up);
   render();
   try {
-    const start = await api('files', { method: 'POST', body: JSON.stringify({ action: 'start', actor: state.user, kind, job_id, title, role_tag, size: file.size }) });
-    await putFile(start.upload_url, file, (p) => { up.progress = p; renderUploadBars(); });
+    const start = await api('files', { method: 'POST', body: JSON.stringify({ action: 'start', actor: state.user, kind, job_id, title, role_tag, size: file.size, file_type: fileTypeOf(file) }) });
+    await putFile(start.upload_url, file, (p) => { up.progress = p; renderUploadBars(); }, fileTypeOf(file));
     up.progress = 1;
     const done = await api('files', { method: 'POST', body: JSON.stringify({ action: 'finish', actor: state.user, id: start.document.id }) });
     const doc = done.document;
@@ -2857,8 +2867,8 @@ async function replacePdf(doc, file) {
   state.uploads.push(up);
   render();
   try {
-    const start = await api('files', { method: 'POST', body: JSON.stringify({ action: 'replace', actor: state.user, id: doc.id, size: file.size }) });
-    await putFile(start.upload_url, file, (p) => { up.progress = p; renderUploadBars(); });
+    const start = await api('files', { method: 'POST', body: JSON.stringify({ action: 'replace', actor: state.user, id: doc.id, size: file.size, file_type: fileTypeOf(file) }) });
+    await putFile(start.upload_url, file, (p) => { up.progress = p; renderUploadBars(); }, fileTypeOf(file));
     const done = await api('files', { method: 'POST', body: JSON.stringify({ action: 'finish', actor: state.user, id: doc.id }) });
     Object.assign(doc, done.document);
     showToast(`Replaced the file for ${doc.title}`);
@@ -2872,6 +2882,7 @@ async function replacePdf(doc, file) {
 
 // Open in a new tab. The tab opens right away (so popup blockers allow it), then gets the link.
 async function openDoc(id, download = false) {
+  if (isDocx(entryOf(id, 'doc'))) download = true; // browsers can't show Word files in a tab
   const tab = download ? null : window.open('', '_blank');
   if (tab) { try { tab.document.title = 'Opening…'; tab.document.body.innerHTML = '<p style="font:15px system-ui;padding:24px;color:#666">Opening the PDF…</p>'; } catch { /* cross-origin */ } }
   try {
@@ -2947,9 +2958,9 @@ function renderFiles(job) {
   els.filesCount.textContent = files.length ? plural(files.length, 'file') : '';
   els.filesList.innerHTML = ups.map(uploadBar).join('') + files.map((d) => `
     <li class="file-item" data-doc-id="${escapeHtml(d.id)}">
-      <span class="pdf-tile sm">${PDF_ICON}</span>
+      ${fileTile(d, true)}
       <div class="file-text"><button type="button" class="file-title" data-doc-open title="Open ${escapeHtml(d.title)}">${escapeHtml(d.title)}</button>
-        <span class="file-meta"><span class="mini-avatar ${userClass(d.uploaded_by)}">${escapeHtml((d.uploaded_by || '?')[0])}</span>${relDate(d.uploaded_at)} · ${fileSize(d.size_bytes)}</span></div>
+        <span class="file-meta"><span class="mini-avatar ${userClass(d.uploaded_by)}">${escapeHtml((d.uploaded_by || '?')[0])}</span>${relDate(d.uploaded_at)} · ${isDocx(d) ? 'Word · ' : ''}${fileSize(d.size_bytes)}</span></div>
       <button type="button" class="icon-btn small" data-doc-menu aria-label="More for ${escapeHtml(d.title)}" title="More">${MENU_ICON}</button>
     </li>`).join('');
 }
@@ -3000,15 +3011,15 @@ function resumeRow(d) {
   const n = usedFor(d);
   return `
     <article class="doc-row${d.is_default ? ' is-default' : ''}" data-doc-id="${escapeHtml(d.id)}">
-      <span class="pdf-tile">${PDF_ICON}</span>
+      ${fileTile(d)}
       <div class="doc-text">
         <button type="button" class="doc-title" data-doc-open title="Open ${escapeHtml(d.title)}">${escapeHtml(d.title)}</button>
-        <div class="doc-sub"><span class="mini-avatar ${userClass(d.uploaded_by)}">${escapeHtml((d.uploaded_by || '?')[0])}</span>${escapeHtml(d.uploaded_by || '')} · ${relDate(d.uploaded_at)} · ${fileSize(d.size_bytes)}${n ? ` · <span class="doc-used">Sent for ${plural(n, 'job')}</span>` : ''}</div>
+        <div class="doc-sub"><span class="mini-avatar ${userClass(d.uploaded_by)}">${escapeHtml((d.uploaded_by || '?')[0])}</span>${escapeHtml(d.uploaded_by || '')} · ${relDate(d.uploaded_at)} · ${isDocx(d) ? 'Word · ' : ''}${fileSize(d.size_bytes)}${n ? ` · <span class="doc-used">Sent for ${plural(n, 'job')}</span>` : ''}</div>
       </div>
       <button type="button" class="star-btn${d.is_default ? ' on' : ''}" data-doc-default aria-pressed="${d.is_default}" title="${d.is_default ? `Go-to resume for ${escapeHtml(d.role_tag)}` : `Make this the go-to for ${escapeHtml(d.role_tag)}`}">${d.is_default ? '★ Go-to' : '☆ Make go-to'}</button>
       <div class="actions">
-        <button type="button" class="btn ghost small" data-doc-open>Open ↗</button>
-        <button type="button" class="btn ghost small" data-doc-download>Download</button>
+        ${isDocx(d) ? '' : '<button type="button" class="btn ghost small" data-doc-open>Open ↗</button>'}
+        <button type="button" class="btn ghost small" data-doc-download>Download${isDocx(d) ? ' .docx' : ''}</button>
         <button type="button" class="btn ghost small menu-btn" data-doc-menu aria-label="More for ${escapeHtml(d.title)}" title="More">${MENU_ICON}</button>
       </div>
     </article>`;
@@ -3016,9 +3027,9 @@ function resumeRow(d) {
 function renderResumes() {
   const list = resumeDocs();
   const ups = state.uploads.filter((u) => u.kind === 'resume' && !u.replacing);
-  const bar = `<div class="subfilters co-bar res-bar"><span class="res-hint">Standard resumes you both use. Drop a PDF here to add one.</span><button class="btn primary small co-new" data-doc-new>+ Upload resume</button></div>`;
+  const bar = `<div class="subfilters co-bar res-bar"><span class="res-hint">Standard resumes you both use. Drop a PDF or Word file here to add one.</span><button class="btn primary small co-new" data-doc-new>+ Upload resume</button></div>`;
   if (!list.length && !ups.length) {
-    return { html: `${bar}<label class="dropzone res-empty" data-doc-new><span class="dz-main"><b>Add your first resume</b></span><span class="dz-sub">e.g. Chief of Staff, Operations Management · PDF up to 10 MB</span></label>`, empty: null };
+    return { html: `${bar}<label class="dropzone res-empty" data-doc-new><span class="dz-main"><b>Add your first resume</b></span><span class="dz-sub">e.g. Chief of Staff, Operations Management · PDF or .docx, up to 10 MB</span></label>`, empty: null };
   }
   const roles = [...new Set([...list.map((d) => d.role_tag), ...ups.map((u) => u.role_tag)])]
     .sort((a, b) => list.filter((d) => d.role_tag === b).length - list.filter((d) => d.role_tag === a).length || a.localeCompare(b));
@@ -3040,9 +3051,10 @@ function openDocModal(doc = null, file = null) {
   if (!state.user) { chooseUser(); return; }
   state.docEdit = doc;
   state.docFile = null;
+  state.docAutoTitle = '';
   const isResume = !doc || doc.kind === 'resume';
   els.docModalTitle.textContent = doc ? (isResume ? 'Edit resume' : 'Edit file') : 'Upload a resume';
-  els.docModalSub.textContent = doc ? 'Rename it, or drop a new PDF to replace the file.' : 'Both of you can open it from anywhere.';
+  els.docModalSub.textContent = doc ? 'Rename it, or drop a new PDF or Word file to replace it.' : 'PDF or Word (.docx). Both of you can open it from anywhere.';
   els.docRoleField.classList.toggle('hidden', !isResume);
   els.docTitle.value = doc ? doc.title : '';
   els.docRole.value = doc ? (doc.role_tag || '') : '';
@@ -3058,10 +3070,12 @@ function setDocFile(file) {
   state.docFile = file || null;
   els.docDrop.classList.toggle('has-file', !!file);
   els.docDropText.innerHTML = file
-    ? `${PDF_ICON}<b>${escapeHtml(file.name)}</b> · ${fileSize(file.size)} <u>change</u>`
-    : state.docEdit ? '<b>Drop a new PDF</b> to replace the file, or <u>browse</u>' : '<b>Drop a PDF</b> here or <u>browse</u>';
-  if (file && !els.docTitle.value.trim()) els.docTitle.value = nameFromFile(file);
+    ? `${fileTypeOf(file) === 'docx' ? WORD_ICON : PDF_ICON}<b>${escapeHtml(file.name)}</b> · ${fileSize(file.size)} <u>change</u>`
+    : state.docEdit ? '<b>Drop a new PDF or Word file</b> to replace it, or <u>browse</u>' : '<b>Drop a PDF or Word file</b> here or <u>browse</u>';
   const problem = file ? checkPdf(file) : '';
+  // Fill the name from the file, unless someone typed their own.
+  const typed = els.docTitle.value.trim();
+  if (file && !problem && (!typed || typed === state.docAutoTitle)) { els.docTitle.value = nameFromFile(file); state.docAutoTitle = els.docTitle.value; }
   els.docErr.textContent = problem;
 }
 function closeDocModal() { els.docModal.classList.add('hidden'); state.docEdit = null; state.docFile = null; els.docFile.value = ''; }
@@ -3084,7 +3098,7 @@ els.docForm.addEventListener('submit', (e) => {
   const title = els.docTitle.value.replace(/\s+/g, ' ').trim();
   const role = els.docRole.value.replace(/\s+/g, ' ').trim();
   const isResume = !doc || doc.kind === 'resume';
-  if (!doc && !file) { els.docErr.textContent = 'Choose a PDF first.'; return; }
+  if (!doc && !file) { els.docErr.textContent = 'Choose a PDF or Word file first.'; return; }
   if (file && checkPdf(file)) { els.docErr.textContent = checkPdf(file); return; }
   if (!title) { els.docErr.textContent = 'Give it a name.'; els.docTitle.focus(); return; }
   if (isResume && !role) { els.docErr.textContent = 'Pick the role it’s for.'; els.docRole.focus(); return; }
@@ -3097,7 +3111,7 @@ els.docForm.addEventListener('submit', (e) => {
 });
 
 function openDocMenu(doc, anchor, point) {
-  showRowMenu(doc.id, 'doc', `<button role="menuitem" class="menu-item" data-menu="doc-open">Open</button><button role="menuitem" class="menu-item" data-menu="doc-download">Download</button><button role="menuitem" class="menu-item" data-menu="doc-edit">Rename or replace…</button>${doc.kind === 'resume' && !doc.is_default ? '<button role="menuitem" class="menu-item" data-menu="doc-default">Make go-to</button>' : ''}<div class="menu-sep"></div><button role="menuitem" class="menu-item danger" data-menu="doc-delete">Delete…</button>`, anchor, point);
+  showRowMenu(doc.id, 'doc', `${isDocx(doc) ? '' : '<button role="menuitem" class="menu-item" data-menu="doc-open">Open</button>'}<button role="menuitem" class="menu-item" data-menu="doc-download">Download</button><button role="menuitem" class="menu-item" data-menu="doc-edit">Rename or replace…</button>${doc.kind === 'resume' && !doc.is_default ? '<button role="menuitem" class="menu-item" data-menu="doc-default">Make go-to</button>' : ''}<div class="menu-sep"></div><button role="menuitem" class="menu-item danger" data-menu="doc-delete">Delete…</button>`, anchor, point);
 }
 function docMenuAction(doc, item) {
   const what = item.dataset.menu;

@@ -1243,3 +1243,6 @@ i.heat { display: inline-block; width: 12px; height: 12px; border-radius: 3px; b
   .an-log-cos { width: 100%; }
   .an-hbar { grid-template-columns: 96px 1fr 30px; }
 }
+/* Word files get a blue tile (PDFs are red). */
+.pdf-tile.word { background: color-mix(in srgb, #2a78d6 14%, var(--surface)); color: #2a78d6; }
+:root[data-resolved="dark"] .pdf-tile.word { color: #86b6ef; }

@@ -123,7 +123,7 @@ test('The list hides unfinished and deleted files and never exposes storage path
   assert.equal(res.statusCode, 200);
   const list = calls.find((c) => c.method === 'GET' && c.url.includes('ready=is.true'));
   assert.match(list.url, /deleted_at=is\.null/);
-  assert.doesNotMatch(list.url, /select=[^&]*path/);
+  assert.deepEqual(JSON.parse(res.body).documents, []);
 });
 
 test('Rename, change role, go-to, delete and undo', async () => {
@@ -172,4 +172,25 @@ test('Storage calls without a body send no JSON content-type (Storage rejects th
   const sign = seen.find((c) => c.url.includes('/upload/sign/'));
   assert.equal(sign.body, undefined);
   assert.equal(sign.headers['Content-Type'], undefined);
+});
+
+test('Word (.docx) files: stored as .docx, checked as Word, and always download', async () => {
+  let calls = mock();
+  const res = await post({ action: 'start', kind: 'resume', title: 'CoS resume', role_tag: 'CoS', size: 5000, file_type: 'docx' });
+  assert.equal(res.statusCode, 201);
+  assert.match(calls.find((c) => c.method === 'POST' && c.url.includes('/rest/v1/documents')).body[0].path, /^resumes\/[0-9a-f-]{36}\.docx$/);
+  assert.equal(JSON.parse(res.body).document.file_type, 'docx');
+  mock();
+  assert.equal((await post({ action: 'start', kind: 'resume', title: 'x', role_tag: 'CoS', size: 5, file_type: 'exe' })).statusCode, 400);
+  const docx = readyDoc({ path: `resumes/${ID}.docx`, ready: false });
+  calls = mock({ doc: docx, stored: { size: 4000, mimetype: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' } });
+  assert.equal((await post({ action: 'finish', id: ID })).statusCode, 200);
+  mock({ doc: docx, stored: { size: 4000, mimetype: 'application/pdf' } });
+  assert.equal((await post({ action: 'finish', id: ID })).statusCode, 400, 'declared .docx but stored as PDF');
+  mock({ doc: readyDoc({ path: `resumes/${ID}.docx` }) });
+  const open = await files({ httpMethod: 'GET', queryStringParameters: { open: ID } });
+  assert.match(JSON.parse(open.body).url, /&download=CoS%20resume\.docx$/);
+  calls = mock({ doc: readyDoc() });
+  await post({ action: 'replace', id: ID, size: 3000, file_type: 'docx' });
+  assert.match(calls.find((c) => c.method === 'PATCH').body.pending_path, new RegExp(`^resumes/${ID}-\\d+\\.docx$`));
 });

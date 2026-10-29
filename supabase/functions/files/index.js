@@ -1,12 +1,16 @@
 import { supabase, storage, projectUrl } from '../_shared/supabase.js';
 
-// PDFs for Job Sprint: files attached to a job, and the shared library of standard resumes.
+// Files for Job Sprint (PDF or Word .docx): files attached to a job, and the shared library of standard resumes.
 // Files live in a private Storage bucket. The browser never gets a key: it asks this function
 // for a short-lived upload or view link, one file at a time.
 const USERS = ['Garima', 'Indresh'];
 const BUCKET = 'documents';
 const MAX_BYTES = 10 * 1024 * 1024;
 const KINDS = ['resume', 'attachment'];
+// Allowed file types: extension -> the content type Storage records for it.
+const TYPES = { pdf: 'application/pdf', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' };
+const typeOf = (path) => (/\.docx$/i.test(path || '') ? 'docx' : 'pdf');
+const cleanType = (v) => (v === undefined || v === null ? 'pdf' : Object.hasOwn(TYPES, v) ? v : null);
 const VIEW_SECONDS = 600;
 const PURGE_AFTER_MS = 24 * 3600 * 1000; // deleted files can be undone for a day, then they're removed
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -27,14 +31,14 @@ async function patchDoc(filter, patch) {
   const rows = await supabase(filter, { method: 'PATCH', headers: { Prefer: 'return=representation' }, body: patch });
   return rows?.[0] || null;
 }
-const publicDoc = (d) => Object.fromEntries(COLUMNS.split(',').map((k) => [k, d[k]]));
+const publicDoc = (d) => ({ ...Object.fromEntries(COLUMNS.split(',').map((k) => [k, d[k]])), file_type: typeOf(d.path) });
 
-// A signed link the browser can PUT one PDF to. Valid for one upload of that exact path.
+// A signed link the browser can PUT one file to. Valid for one upload of that exact path.
 async function signUpload(path) {
   const out = await storage(`object/upload/sign/${BUCKET}/${encPath(path)}`, { method: 'POST' });
   return `${projectUrl()}/storage/v1${out.url}`;
 }
-// Checks the upload really landed and is a PDF within the size limit.
+// Checks the upload really landed, is the declared type, and is within the size limit.
 async function storedObject(path) {
   const slash = path.lastIndexOf('/');
   const list = await storage(`object/list/${BUCKET}`, { method: 'POST', body: { prefix: path.slice(0, slash), search: path.slice(slash + 1), limit: 5 } });
@@ -59,13 +63,15 @@ async function handleGet(query = {}) {
     if (!UUID.test(query.open)) return bad('Invalid file.');
     const doc = await getDoc(query.open);
     if (!doc || !doc.ready || doc.deleted_at) return json(404, { error: 'That file is gone.' });
-    const download = query.download === '1' ? `&download=${encodeURIComponent(`${doc.title.replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'file'}.pdf`)}` : '';
+    // Word files can't be shown in a browser tab, so they always download (with a readable name).
+    const wantsFile = query.download === '1' || typeOf(doc.path) === 'docx';
+    const download = wantsFile ? `&download=${encodeURIComponent(`${doc.title.replace(/[\\/:*?"<>|]+/g, ' ').trim() || 'file'}.${typeOf(doc.path)}`)}` : '';
     const out = await storage(`object/sign/${BUCKET}/${encPath(doc.path)}`, { method: 'POST', body: { expiresIn: VIEW_SECONDS } });
     return json(200, { url: `${projectUrl()}/storage/v1${out.signedURL}${download}` });
   }
   try { await purge(); } catch { /* never block the list on housekeeping */ }
-  const documents = await supabase(`documents?select=${COLUMNS}&ready=is.true&deleted_at=is.null&order=uploaded_at.desc`);
-  return json(200, { documents });
+  const rows = await supabase(`documents?select=${COLUMNS},path&ready=is.true&deleted_at=is.null&order=uploaded_at.desc`);
+  return json(200, { documents: (rows || []).map(publicDoc) });
 }
 
 async function handlePost(body) {
@@ -78,7 +84,9 @@ async function handlePost(body) {
     if (!KINDS.includes(kind)) return bad('Invalid file type.');
     const size = Number(body.size);
     if (!Number.isInteger(size) || size <= 0) return bad('That file looks empty.');
-    if (size > MAX_BYTES) return bad('PDFs can be up to 10 MB.');
+    if (size > MAX_BYTES) return bad('Files can be up to 10 MB.');
+    const fileType = cleanType(body.file_type);
+    if (!fileType) return bad('Only PDF or Word (.docx) files.');
     const title = tidy(body.title, 200);
     if (!title) return bad('Give the file a name.');
     let jobId = null;
@@ -93,7 +101,7 @@ async function handlePost(body) {
       if (!roleTag) return bad('Pick the role this resume is for.');
     }
     const id = crypto.randomUUID();
-    const path = `${folder(kind)}/${id}.pdf`;
+    const path = `${folder(kind)}/${id}.${fileType}`;
     const created = await supabase('documents', {
       method: 'POST',
       headers: { Prefer: 'return=representation' },
@@ -106,10 +114,12 @@ async function handlePost(body) {
     if (!UUID.test(body.id || '')) return bad('Invalid file.');
     const size = Number(body.size);
     if (!Number.isInteger(size) || size <= 0) return bad('That file looks empty.');
-    if (size > MAX_BYTES) return bad('PDFs can be up to 10 MB.');
+    if (size > MAX_BYTES) return bad('Files can be up to 10 MB.');
+    const fileType = cleanType(body.file_type);
+    if (!fileType) return bad('Only PDF or Word (.docx) files.');
     const doc = await getDoc(body.id);
     if (!doc || !doc.ready || doc.deleted_at) return json(404, { error: 'That file is gone.' });
-    const pending = `${folder(doc.kind)}/${doc.id}-${Date.now()}.pdf`;
+    const pending = `${folder(doc.kind)}/${doc.id}-${Date.now()}.${fileType}`;
     await patchDoc(byId(doc.id), { pending_path: pending });
     return json(200, { document: publicDoc(doc), upload_url: await signUpload(pending) });
   }
@@ -124,10 +134,10 @@ async function handlePost(body) {
     const obj = await storedObject(path);
     if (!obj) return json(409, { error: 'The upload didn’t arrive. Try again.' });
     const size = Number(obj.metadata?.size) || doc.size_bytes;
-    const mime = obj.metadata?.mimetype || 'application/pdf';
-    if (size > MAX_BYTES || mime !== 'application/pdf') {
+    const mime = obj.metadata?.mimetype || TYPES[typeOf(path)];
+    if (size > MAX_BYTES || mime !== TYPES[typeOf(path)]) {
       await removeObjects([path]);
-      return bad('Only PDFs up to 10 MB.');
+      return bad('Only PDF or Word (.docx) files up to 10 MB.');
     }
     const patch = { ready: true, size_bytes: size, updated_at: now, pending_path: null };
     if (replacing) { patch.path = path; patch.uploaded_by = actor; patch.uploaded_at = now; }
