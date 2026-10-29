@@ -48,7 +48,8 @@ export async function storage(path, { method = 'GET', body, headers = {} } = {})
     headers: {
       apikey: key,
       ...(key.startsWith('eyJ') ? { Authorization: `Bearer ${key}` } : {}),
-      'Content-Type': 'application/json',
+      // Storage refuses a JSON content-type with an empty body, so only send it with a body.
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
       ...headers,
     },
     body: body ? JSON.stringify(body) : undefined,

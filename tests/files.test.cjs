@@ -159,3 +159,17 @@ test('A job can record which standard resume was sent', async () => {
   assert.equal(calls[0].body.resume_id, null);
   assert.equal((await jobs({ httpMethod: 'PATCH', body: JSON.stringify({ id: JOB, actor: 'Garima', action: 'resume', resume_id: 'nope' }) })).statusCode, 400);
 });
+
+test('Storage calls without a body send no JSON content-type (Storage rejects that)', async () => {
+  const seen = [];
+  global.fetch = async (url, options = {}) => {
+    seen.push({ url: String(url), headers: options.headers || {}, body: options.body });
+    if (String(url).includes('/rest/v1/jobs')) return reply([{ id: JOB }]);
+    if (String(url).includes('/rest/v1/documents')) return reply(JSON.parse(options.body), 201);
+    return reply({ url: '/object/upload/sign/documents/x?token=up' });
+  };
+  await post({ action: 'start', kind: 'resume', title: 'x', role_tag: 'CoS', size: 5 });
+  const sign = seen.find((c) => c.url.includes('/upload/sign/'));
+  assert.equal(sign.body, undefined);
+  assert.equal(sign.headers['Content-Type'], undefined);
+});
