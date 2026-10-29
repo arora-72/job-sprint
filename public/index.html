@@ -60,6 +60,37 @@
   </div>
 
   <!-- Track a company -->
+  <div id="docModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="docModalTitle">
+    <form id="docForm" class="modal doc-modal" novalidate autocomplete="off">
+      <div class="modal-title-row">
+        <div>
+          <h2 id="docModalTitle">Upload a resume</h2>
+          <p id="docModalSub" class="block-job-name">Both of you can open it from anywhere.</p>
+        </div>
+        <button type="button" class="icon-btn" id="closeDocModal" aria-label="Close">×</button>
+      </div>
+      <label class="dropzone big" id="docDrop">
+        <input type="file" id="docFile" accept="application/pdf,.pdf" />
+        <span class="dz-main" id="docDropText"><b>Drop a PDF</b> here or <u>browse</u></span>
+        <span class="dz-sub">PDF, up to 10 MB</span>
+      </label>
+      <label class="field"><span class="field-label">Name <span class="req">required</span></span>
+        <input id="docTitle" type="text" maxlength="200" placeholder="e.g. CoS resume, tech focus" />
+      </label>
+      <div class="field" id="docRoleField">
+        <span class="field-label">Use it for <span class="req">required</span></span>
+        <div class="reason-chips" id="docRoleChips"></div>
+        <input id="docRole" type="text" maxlength="80" placeholder="Or type a role" aria-label="Role" list="docRoleList" />
+        <datalist id="docRoleList"></datalist>
+      </div>
+      <p id="docErr" class="form-err"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn secondary" id="cancelDoc">Cancel</button>
+        <button type="submit" class="btn primary" id="saveDoc">Upload</button>
+      </div>
+    </form>
+  </div>
+
   <div id="companyModal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="companyModalTitle">
     <form id="companyForm" class="modal company-modal" novalidate autocomplete="off">
       <div class="modal-title-row">
@@ -234,6 +265,7 @@
           <button class="tab active" role="tab" aria-selected="true" data-tab="open">To apply <span id="openCount" class="count-badge">0</span></button>
           <button class="tab" role="tab" aria-selected="false" data-tab="networking">Networking <span id="networkingCount" class="count-badge">0</span></button>
           <button class="tab" role="tab" aria-selected="false" data-tab="companies">Companies <span id="companiesCount" class="count-badge">0</span></button>
+          <button class="tab" role="tab" aria-selected="false" data-tab="resumes">Resumes <span id="resumesCount" class="count-badge">0</span></button>
           <button class="tab" role="tab" aria-selected="false" data-tab="history">History <span id="historyCount" class="count-badge">0</span></button>
           <button class="tab" role="tab" aria-selected="false" data-tab="discover">Discover <span id="discoverCount" class="count-badge">0</span></button>
         </div>
@@ -309,6 +341,20 @@
         <input id="personLink" type="text" inputmode="url" maxlength="500" placeholder="LinkedIn link (optional)" aria-label="Person link" />
         <button class="btn secondary small" type="submit">Add person</button>
       </form>
+    </section>
+    <section id="filesSection" class="files-section hidden">
+      <div class="files-head"><h3>Files</h3><span id="filesCount" class="people-count"></span></div>
+      <div class="resume-sent">
+        <label for="resumeSent">Resume sent</label>
+        <select id="resumeSent"></select>
+        <button type="button" id="resumeSentOpen" class="btn ghost small hidden">Open ↗</button>
+      </div>
+      <ul id="filesList" class="files-list"></ul>
+      <label class="dropzone" id="filesDrop">
+        <input type="file" id="filesInput" accept="application/pdf,.pdf" multiple />
+        <span class="dz-main"><b>Drop a PDF</b> here or <u>browse</u></span>
+        <span class="dz-sub">PDF, up to 10 MB · cover letter, JD, offer…</span>
+      </label>
     </section>
     <form id="noteForm" class="note-form" novalidate>
       <textarea id="noteInput" rows="3" maxlength="1000" placeholder="Add a note: who you reached out to, what they said, next step…" aria-label="New note"></textarea>

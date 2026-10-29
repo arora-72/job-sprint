@@ -56,6 +56,10 @@ const state = {
   todoDoneCollapsed: store.get('jobSprintTodoDone') === 'collapsed',
   openView: store.get('jobSprintOpenView') === 'date' ? 'date' : 'priority', // To apply: 'priority' | 'date'
   prioDrag: null,       // drag state while reordering To apply
+  docs: [],             // PDFs: standard resumes + files attached to jobs (metadata only)
+  docsLoaded: false,
+  uploads: [],          // uploads in progress: { tmp, kind, job_id, title, role_tag, progress }
+  docEdit: null,        // the file being renamed/replaced in the modal, or null for a new resume
 };
 let refreshTimer = null;
 
@@ -75,6 +79,8 @@ const els = {};
   'filterChip', 'filterChipText', 'syncText', 'refreshBtn', 'loadingState', 'emptyState', 'emptyIcon',
   'emptyTitle', 'emptyText', 'jobList', 'toast', 'toastText', 'toastUndo',
   'blockModal', 'blockJobName', 'blockReason', 'closeBlockModal', 'cancelBlock', 'confirmBlock', 'reasonChips',
+  'resumesCount', 'filesSection', 'filesCount', 'resumeSent', 'resumeSentOpen', 'filesList', 'filesDrop', 'filesInput',
+  'docModal', 'docForm', 'docModalTitle', 'docModalSub', 'closeDocModal', 'docDrop', 'docFile', 'docDropText', 'docTitle', 'docRoleField', 'docRoleChips', 'docRole', 'docRoleList', 'docErr', 'cancelDoc', 'saveDoc',
   'notesBackdrop', 'notesDrawer', 'notesTitle', 'notesSub', 'closeNotes', 'noteForm', 'noteInput', 'saveNote', 'notesList',
 ].forEach((id) => { els[id] = $(id); });
 
@@ -282,6 +288,23 @@ async function loadTodos({ silent = false } = {}) {
   }
 }
 
+async function loadDocs({ silent = false } = {}) {
+  if (state.docsLoading || state.uploads.length) return false;
+  state.docsLoading = true;
+  try {
+    const data = await api('files');
+    state.docs = data.documents || [];
+    return true;
+  } catch (err) {
+    if (!silent && state.tab === 'resumes') showToast(err.message, { error: true });
+    return false;
+  } finally {
+    state.docsLoading = false;
+    state.docsLoaded = true;
+    render();
+  }
+}
+
 async function loadCompanies({ silent = false } = {}) {
   if (state.companiesLoading || state.inflight.size) return false; // don't clobber optimistic changes mid-flight
   state.companiesLoading = true;
@@ -329,7 +352,7 @@ async function refreshAll({ silent = false, afterAction = false } = {}) {
   els.refreshBtn.disabled = true;
   state.refreshPromise = (async () => {
     // Companies load alongside, but a companies failure never marks the whole refresh as failed.
-    const [jobsOk, discoverOk] = await Promise.all([loadJobs({ silent }), loadDiscover({ silent }), loadCompanies({ silent }), loadTodos({ silent })]);
+    const [jobsOk, discoverOk] = await Promise.all([loadJobs({ silent }), loadDiscover({ silent }), loadCompanies({ silent }), loadTodos({ silent }), loadDocs({ silent })]);
     state.refreshError = !(jobsOk && discoverOk);
     if (!state.refreshError) state.lastSync = new Date();
     return !state.refreshError;
@@ -463,7 +486,7 @@ function coCell(job) {
 function subLine(job) {
   const name = job.company || 'Unknown company';
   const parts = [`<span class="sub-co">${coTile(name, true)}<span>${displayHtml(name)}</span></span>`];
-  if (job.location) { parts.push('<span class="dot sub-co">·</span>'); parts.push(displayHtml(job.location)); }
+  if (job.location) { parts.push('<span class="dot sub-co">·</span>'); parts.push(`<span class="loc" title="${escapeHtml(readableText(job.location))}">${displayHtml(job.location)}</span>`); }
   return parts.join('');
 }
 function titleLink(job) {
@@ -473,13 +496,18 @@ function notePreview(job) {
   const notes = notesOf(job);
   const last = notes[notes.length - 1];
   if (!last) return '';
+  // The hold pill already says this; don't repeat it.
+  if (job.status && isHeld(job) && last.text === `On hold: ${job.hold_reason}`) return '';
   return `<button class="note-preview" data-action="notes" title="Open notes">
     <span class="note-preview-text">${displayHtml(last.text)}</span><span class="note-preview-meta">${escapeHtml((last.by || '?')[0])} · ${relDate(last.at)}</span>
   </button>`;
 }
+const CLIP_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.4 11.1l-8.5 8.5a5.5 5.5 0 0 1-7.8-7.8l8.5-8.5a3.7 3.7 0 0 1 5.2 5.2l-8.5 8.5a1.8 1.8 0 0 1-2.6-2.6l7.8-7.8"/></svg>';
 function notesButton(job) {
   const n = notesOf(job).length;
-  return `<button class="btn ghost small notes-btn${n ? ' has-notes' : ''}" data-action="notes" aria-label="Notes${n ? ` (${n})` : ''}" title="Notes">${NOTE_ICON}${n ? `<span>${n}</span>` : ''}</button>`;
+  const f = job.status ? fileCount(job) : 0; // jobs only (not companies or Discover)
+  const label = `Notes${n ? ` (${n})` : ''}${job.status ? ` and files${f ? ` (${f})` : ''}` : ''}`;
+  return `<button class="btn ghost small notes-btn${n || f ? ' has-notes' : ''}" data-action="notes" aria-label="${label}" title="${job.status ? 'Notes & files' : 'Notes'}">${NOTE_ICON}${n ? `<span>${n}</span>` : ''}${f ? `<span class="clip">${CLIP_ICON}${f}</span>` : ''}</button>`;
 }
 function openLink(job) {
   return `<a class="btn ghost small" href="${escapeHtml(safeJobUrl(job.url))}" target="_blank" rel="noopener">Open ↗</a>`;
@@ -1058,7 +1086,7 @@ function renderDiscover() {
 
 // Everything on the current tab before the owner filter, so the filter bar can show honest counts.
 function tabBase() {
-  if (state.tab === 'discover') return null;
+  if (state.tab === 'discover' || state.tab === 'resumes') return null;
   if (state.tab === 'companies') return state.companies;
   return state.jobs.filter((j) => stageOf(j) === state.tab);
 }
@@ -1171,6 +1199,7 @@ function render() {
   els.openCount.textContent = b.open.length;
   els.networkingCount.textContent = b.networking.length;
   els.companiesCount.textContent = state.companies.filter(ownerMatch).length;
+  els.resumesCount.textContent = resumeDocs().length;
   els.discoverCount.textContent = state.discover.length;
   els.historyCount.textContent = b.history.length;
   if (typeof syncTabFade === 'function') requestAnimationFrame(syncTabFade);
@@ -1189,7 +1218,7 @@ function render() {
   els.syncText.classList.toggle('sync-error', state.refreshError);
 
   // List
-  const renderers = { open: renderOpen, networking: renderNetworking, companies: renderCompanies, history: renderHistory, discover: renderDiscover };
+  const renderers = { open: renderOpen, networking: renderNetworking, companies: renderCompanies, resumes: renderResumes, history: renderHistory, discover: renderDiscover };
   renderOwnerBar();
   let { html = '', empty = null, total = 0 } = searching ? renderSearch() : renderers[state.tab](b);
   if (searching) els.ownerBar.classList.add('hidden');
@@ -1202,7 +1231,7 @@ function render() {
   els.jobList.innerHTML = html;
   if (searching) highlightSearch();
   if (focusGrip) els.jobList.querySelector(`.job-row[data-id="${CSS.escape(focusGrip)}"] [data-prio-grip]`)?.focus({ preventScroll: true });
-  const showEmpty = !!empty && (searching ? state.loadedOnce : state.tab === 'discover' ? state.discoverLoaded : state.tab === 'companies' ? state.companiesLoaded : state.loadedOnce);
+  const showEmpty = !!empty && (searching ? state.loadedOnce : state.tab === 'resumes' ? state.docsLoaded : state.tab === 'discover' ? state.discoverLoaded : state.tab === 'companies' ? state.companiesLoaded : state.loadedOnce);
   els.emptyState.classList.toggle('hidden', !showEmpty);
   if (empty) {
     els.emptyIcon.textContent = empty[0];
@@ -1221,7 +1250,7 @@ function setView(tab, filter = null) {
   render();
   if (changed) document.querySelector(`.tab[data-tab="${tab}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   syncTabFade();
-  if ((tab === 'discover' && !state.discoverLoaded) || (tab === 'companies' && !state.companiesLoaded)) { if (!state.refreshPromise) refreshAll({ silent: true }); }
+  if ((tab === 'discover' && !state.discoverLoaded) || (tab === 'companies' && !state.companiesLoaded) || (tab === 'resumes' && !state.docsLoaded)) { if (!state.refreshPromise) refreshAll({ silent: true }); }
 }
 document.querySelectorAll('.stat').forEach((s) => s.addEventListener('click', () => {
   const v = s.dataset.view;
@@ -1290,7 +1319,7 @@ function localPatch(status, reason) {
   return { status, applied_by: null, applied_at: null, blocked_by: null, blocked_at: null, blocked_reason: '', ...CLEARED_NETWORK, updated_at: now };
 }
 
-function listFor(coll) { return coll === 'companies' ? state.companies : coll === 'discover' ? state.discover : coll === 'todos' ? state.todos : state.jobs; }
+function listFor(coll) { return coll === 'files' ? state.docs : coll === 'companies' ? state.companies : coll === 'discover' ? state.discover : coll === 'todos' ? state.todos : state.jobs; }
 const collOf = (kind) => (kind === 'company' ? 'companies' : kind === 'discover' ? 'discover' : 'jobs');
 
 // Apply a change locally right away, then save it. Saves for one job run in order; a failure rolls back.
@@ -1310,7 +1339,7 @@ function mutate(id, local, body, coll = 'jobs') {
   let saved = false;
   next.then((res) => {
     saved = true;
-    const savedRow = res && (res.job || res.company || res.role || res.todo);
+    const savedRow = res && (res.job || res.company || res.role || res.todo || res.document);
     if (state.inflight.get(id) === next && savedRow) Object.assign(job, savedRow);
   })
     .catch((err) => {
@@ -1456,6 +1485,7 @@ function celebrate(originEl, big) {
 function jobLabel(job) { return `${readableText(job.title || 'Role')}${job.company ? ` at ${readableText(job.company)}` : ''}`; }
 
 els.jobList.addEventListener('click', (e) => {
+  if (state.tab === 'resumes' && !state.query && onDocClick(e)) return;
   const hf = e.target.closest('[data-hfilter]');
   if (hf) { state.historyFilter = hf.dataset.hfilter; render(); return; }
   const cf = e.target.closest('[data-cofilter]');
@@ -1553,8 +1583,11 @@ function renderNotes() {
   const job = listFor(collOf(state.notesKind)).find((j) => j.id === state.notesJobId);
   if (!job) { closeNotes(); return; }
   els.peopleSection.classList.toggle('hidden', !company);
+  els.filesSection.classList.toggle('hidden', company || discover);
+  if (!company && !discover) renderFiles(job);
   els.companyFoot.classList.toggle('hidden', !company);
   els.notesDrawer.classList.toggle('is-company', company);
+  els.notesDrawer.querySelector('.eyebrow-sm').textContent = 'Notes';
   if (company) {
     els.notesTitle.textContent = readableText(job.name);
     els.notesSub.textContent = [readableText(job.source || ''), STAGE[stageOfCompany(job)].label].filter(Boolean).join(' · ');
@@ -1564,6 +1597,7 @@ function renderNotes() {
     els.notesSub.textContent = [readableText(job.company || ''), 'Discover'].filter(Boolean).join(' · ');
   } else {
     els.notesTitle.textContent = readableText(job.title || 'Untitled role');
+    els.notesDrawer.querySelector('.eyebrow-sm').textContent = 'Notes & files';
     const stageLabel = { open: 'To apply', networking: `Networking · ${NETWORK[netStatus(job)].label}`, history: 'History' }[stageOf(job)];
     els.notesSub.textContent = [readableText(job.company || ''), stageLabel].filter(Boolean).join(' · ');
   }
@@ -1639,7 +1673,7 @@ const MENU_ICON = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="tru
 function menuButton() {
   return `<button class="btn ghost small menu-btn" data-action="menu" aria-label="More actions" aria-haspopup="menu" title="More actions">${MENU_ICON}</button>`;
 }
-function entryOf(id, kind) { return (kind === 'company' ? state.companies : kind === 'todo' ? state.todos : state.jobs).find((x) => x.id === id); }
+function entryOf(id, kind) { return (kind === 'company' ? state.companies : kind === 'todo' ? state.todos : kind === 'doc' ? state.docs : state.jobs).find((x) => x.id === id); }
 
 // Opens next to a button, or at the pointer for a right-click.
 function openRowMenu(id, kind, anchor, point) {
@@ -1735,6 +1769,7 @@ els.rowMenu.addEventListener('click', async (e) => {
   const entry = entryOf(id, kind);
   if (!entry) { closeRowMenu(); return; }
   if (kind === 'todo') { todoMenuAction(entry, item); return; }
+  if (kind === 'doc') { docMenuAction(entry, item); return; }
   if (item.dataset.menu === 'ptop' || item.dataset.menu === 'pbottom') { closeRowMenu(); moveJobToEnd(id, item.dataset.menu === 'ptop'); return; }
   if (item.dataset.menu === 'todo') {
     closeRowMenu();
@@ -1767,7 +1802,7 @@ els.rowMenu.addEventListener('keydown', (e) => {
   items[(i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length].focus();
 });
 document.addEventListener('mousedown', (e) => {
-  if (!els.rowMenu.classList.contains('hidden') && !e.target.closest('#rowMenu, .menu-btn, .own, .tmenu, .hold-pill')) closeRowMenu();
+  if (!els.rowMenu.classList.contains('hidden') && !e.target.closest('#rowMenu, .menu-btn, .own, .tmenu, .hold-pill, [data-doc-menu]')) closeRowMenu();
 });
 window.addEventListener('resize', closeRowMenu);
 window.addEventListener('scroll', closeRowMenu, true);
@@ -2722,6 +2757,7 @@ document.addEventListener('keydown', (e) => {
     if (!els.rowMenu.classList.contains('hidden')) closeRowMenu();
     else if (state.todoEditing) { /* the edit box handles its own Escape */ }
     else if (state.todoOpen) closeTodos();
+    else if (!els.docModal.classList.contains('hidden')) closeDocModal();
     else if (!els.companyModal.classList.contains('hidden')) closeCompanyModal();
     else if (state.notesJobId) closeNotes();
     else if (!els.blockModal.classList.contains('hidden')) closeBlockModal();
@@ -2733,6 +2769,346 @@ document.addEventListener('keydown', (e) => {
 /* ---------- Stay in sync without frequent database reads ---------- */
 document.addEventListener('visibilitychange', refreshIfDue);
 window.addEventListener('focus', refreshIfDue);
+
+
+/* ---------- PDFs: files on a job + the shared Resumes library ---------- */
+// Files live in a private Supabase Storage bucket. This page only ever sees short-lived links
+// from the `files` function: one to upload a PDF, one to view it.
+const MAX_PDF = 10 * 1024 * 1024;
+const ROLE_PRESETS = ['Chief of Staff', 'Operations Management', 'BizOps', 'Strategy & Operations', 'Product Ops'];
+const PDF_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>';
+function resumeDocs() { return state.docs.filter((d) => d.kind === 'resume'); }
+function jobFiles(jobId) { return state.docs.filter((d) => d.kind === 'attachment' && d.job_id === jobId); }
+function resumeOf(job) { return job.resume_id ? resumeDocs().find((d) => d.id === job.resume_id) || null : null; }
+function fileCount(job) { return jobFiles(job.id).length + (resumeOf(job) ? 1 : 0) + state.uploads.filter((u) => u.job_id === job.id).length; }
+function usedFor(doc) { return state.jobs.filter((j) => j.resume_id === doc.id).length; }
+function fileSize(bytes) { return bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`; }
+function isPdf(file) { return file && (file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '')); }
+function nameFromFile(file) { return (file.name || 'Document').replace(/\.pdf$/i, '').replace(/[_]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200) || 'Document'; }
+function checkPdf(file) {
+  if (!isPdf(file)) return 'Only PDF files can be added.';
+  if (file.size > MAX_PDF) return `${file.name} is over 10 MB.`;
+  if (!file.size) return `${file.name} is empty.`;
+  return '';
+}
+
+// PUT the file straight to Storage with a progress bar.
+function putFile(url, file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', url);
+    xhr.setRequestHeader('Content-Type', 'application/pdf');
+    xhr.setRequestHeader('x-upsert', 'false');
+    xhr.setRequestHeader('apikey', API_KEY);
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(e.loaded / e.total); };
+    xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(`Upload failed (${xhr.status})`)));
+    xhr.onerror = () => reject(new Error('Upload failed. Check your connection.'));
+    xhr.send(file);
+  });
+}
+
+async function uploadPdf(file, { kind, job_id = null, title, role_tag = null }) {
+  if (!state.user) { chooseUser(); return null; }
+  const problem = checkPdf(file);
+  if (problem) { showToast(problem, { error: true }); return null; }
+  const up = { tmp: `up-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, kind, job_id, title, role_tag, progress: 0, size: file.size };
+  state.uploads.push(up);
+  render();
+  try {
+    const start = await api('files', { method: 'POST', body: JSON.stringify({ action: 'start', actor: state.user, kind, job_id, title, role_tag, size: file.size }) });
+    await putFile(start.upload_url, file, (p) => { up.progress = p; renderUploadBars(); });
+    up.progress = 1;
+    const done = await api('files', { method: 'POST', body: JSON.stringify({ action: 'finish', actor: state.user, id: start.document.id }) });
+    const doc = done.document;
+    if (doc.is_default) state.docs.forEach((d) => { if (d.kind === 'resume' && d.role_tag === doc.role_tag) d.is_default = false; });
+    state.docs.unshift(doc);
+    showToast(kind === 'resume' ? `Resume added: ${doc.title}` : `Attached: ${doc.title}`);
+    return doc;
+  } catch (err) {
+    showToast(`Couldn't upload ${file.name}: ${err.message}`, { error: true });
+    return null;
+  } finally {
+    state.uploads = state.uploads.filter((u) => u !== up);
+    render();
+  }
+}
+
+async function replacePdf(doc, file) {
+  const problem = checkPdf(file);
+  if (problem) { showToast(problem, { error: true }); return; }
+  const up = { tmp: `up-${Date.now()}`, kind: doc.kind, job_id: doc.job_id, title: doc.title, role_tag: doc.role_tag, progress: 0, size: file.size, replacing: doc.id };
+  state.uploads.push(up);
+  render();
+  try {
+    const start = await api('files', { method: 'POST', body: JSON.stringify({ action: 'replace', actor: state.user, id: doc.id, size: file.size }) });
+    await putFile(start.upload_url, file, (p) => { up.progress = p; renderUploadBars(); });
+    const done = await api('files', { method: 'POST', body: JSON.stringify({ action: 'finish', actor: state.user, id: doc.id }) });
+    Object.assign(doc, done.document);
+    showToast(`Replaced the file for ${doc.title}`);
+  } catch (err) {
+    showToast(`Couldn't replace: ${err.message}`, { error: true });
+  } finally {
+    state.uploads = state.uploads.filter((u) => u !== up);
+    render();
+  }
+}
+
+// Open in a new tab. The tab opens right away (so popup blockers allow it), then gets the link.
+async function openDoc(id, download = false) {
+  const tab = download ? null : window.open('', '_blank');
+  if (tab) { try { tab.document.title = 'Opening…'; tab.document.body.innerHTML = '<p style="font:15px system-ui;padding:24px;color:#666">Opening the PDF…</p>'; } catch { /* cross-origin */ } }
+  try {
+    const { url } = await api(`files?open=${encodeURIComponent(id)}${download ? '&download=1' : ''}`);
+    if (tab) tab.location.href = url;
+    else if (download) { const a = document.createElement('a'); a.href = url; a.rel = 'noopener'; document.body.append(a); a.click(); a.remove(); }
+    else window.location.href = url;
+  } catch (err) {
+    if (tab) tab.close();
+    showToast(`Couldn't open: ${err.message}`, { error: true });
+  }
+}
+
+function deleteDoc(doc) {
+  if (!state.user) { chooseUser(); return; }
+  state.docs = state.docs.filter((d) => d !== doc);
+  render();
+  api('files', { method: 'PATCH', body: JSON.stringify({ id: doc.id, actor: state.user, action: 'delete' }) })
+    .catch((err) => { state.docs.unshift(doc); render(); showToast(`Couldn't delete: ${err.message}`, { error: true }); });
+  const used = doc.kind === 'resume' ? usedFor(doc) : 0;
+  showToast(`Deleted ${doc.title}${used ? ` (still noted on ${plural(used, 'job')})` : ''}`, {
+    undo: async () => {
+      try {
+        const res = await api('files', { method: 'PATCH', body: JSON.stringify({ id: doc.id, actor: state.user, action: 'restore' }) });
+        if (!state.docs.some((d) => d.id === doc.id)) state.docs.unshift({ ...doc, ...res.document, is_default: false });
+        render();
+      } catch (err) { showToast(`Couldn't restore: ${err.message}`, { error: true }); }
+    },
+  });
+}
+function setDefaultResume(doc) {
+  if (!state.user) { chooseUser(); return; }
+  const before = state.docs.filter((d) => d.kind === 'resume' && d.role_tag === doc.role_tag).map((d) => [d, d.is_default]);
+  before.forEach(([d]) => { d.is_default = d === doc; });
+  render();
+  api('files', { method: 'PATCH', body: JSON.stringify({ id: doc.id, actor: state.user, action: 'default' }) })
+    .catch((err) => { before.forEach(([d, v]) => { d.is_default = v; }); render(); showToast(`Couldn't save: ${err.message}`, { error: true }); });
+}
+function setResumeSent(jobId, resumeId) {
+  const job = entryOf(jobId, 'job');
+  if (!job || !state.user) return;
+  const prev = job.resume_id || null;
+  if (prev === resumeId) return;
+  mutate(jobId, { resume_id: resumeId }, { action: 'resume', resume_id: resumeId });
+  const doc = resumeId && entryOf(resumeId, 'doc');
+  showToast(doc ? `Resume sent: ${doc.title}` : 'Resume cleared', { undo: () => setResumeSent(jobId, prev) });
+}
+
+// Files section inside the job's side panel.
+function uploadBar(u) {
+  return `<li class="file-item uploading" data-up="${u.tmp}"><span class="pdf-tile sm">${PDF_ICON}</span><div class="file-text"><span class="file-title">${escapeHtml(u.title)}</span><span class="up-bar"><i style="width:${Math.round(u.progress * 100)}%"></i></span></div><span class="file-meta">${u.progress >= 1 ? 'Saving…' : `${Math.round(u.progress * 100)}%`}</span></li>`;
+}
+function renderUploadBars() {
+  state.uploads.forEach((u) => {
+    document.querySelectorAll(`[data-up="${u.tmp}"]`).forEach((el) => {
+      const bar = el.querySelector('.up-bar i'); if (bar) bar.style.width = `${Math.round(u.progress * 100)}%`;
+      const meta = el.querySelector('.file-meta'); if (meta) meta.textContent = u.progress >= 1 ? 'Saving…' : `${Math.round(u.progress * 100)}%`;
+    });
+  });
+}
+function resumeOptions(selectedId) {
+  const list = resumeDocs();
+  const roles = [...new Set(list.map((d) => d.role_tag))].sort((a, b) => a.localeCompare(b));
+  return `<option value="">${list.length ? 'Not recorded' : 'No resumes yet (add them in the Resumes tab)'}</option>${roles.map((r) => `<optgroup label="${escapeHtml(r)}">${list.filter((d) => d.role_tag === r).map((d) => `<option value="${escapeHtml(d.id)}"${d.id === selectedId ? ' selected' : ''}>${escapeHtml(d.title)}${d.is_default ? ' ★' : ''}</option>`).join('')}</optgroup>`).join('')}`;
+}
+function renderFiles(job) {
+  const sent = resumeOf(job);
+  els.resumeSent.innerHTML = resumeOptions(sent ? sent.id : '');
+  els.resumeSent.disabled = !resumeDocs().length;
+  els.resumeSentOpen.classList.toggle('hidden', !sent);
+  const files = jobFiles(job.id);
+  const ups = state.uploads.filter((u) => u.job_id === job.id && u.kind === 'attachment');
+  els.filesCount.textContent = files.length ? plural(files.length, 'file') : '';
+  els.filesList.innerHTML = ups.map(uploadBar).join('') + files.map((d) => `
+    <li class="file-item" data-doc-id="${escapeHtml(d.id)}">
+      <span class="pdf-tile sm">${PDF_ICON}</span>
+      <div class="file-text"><button type="button" class="file-title" data-doc-open title="Open ${escapeHtml(d.title)}">${escapeHtml(d.title)}</button>
+        <span class="file-meta"><span class="mini-avatar ${userClass(d.uploaded_by)}">${escapeHtml((d.uploaded_by || '?')[0])}</span>${relDate(d.uploaded_at)} · ${fileSize(d.size_bytes)}</span></div>
+      <button type="button" class="icon-btn small" data-doc-menu aria-label="More for ${escapeHtml(d.title)}" title="More">${MENU_ICON}</button>
+    </li>`).join('');
+}
+els.resumeSent.addEventListener('change', () => { if (!state.user) { chooseUser(); return; } setResumeSent(state.notesJobId, els.resumeSent.value || null); });
+els.resumeSentOpen.addEventListener('click', () => { const job = entryOf(state.notesJobId, 'job'); const r = job && resumeOf(job); if (r) openDoc(r.id); });
+els.filesInput.addEventListener('change', () => {
+  const jobId = state.notesJobId;
+  [...els.filesInput.files].forEach((f) => uploadPdf(f, { kind: 'attachment', job_id: jobId, title: nameFromFile(f) }));
+  els.filesInput.value = '';
+});
+// Drag PDFs onto the panel's drop zone, or straight onto a job row.
+function hasFiles(e) { return [...(e.dataTransfer?.types || [])].includes('Files'); }
+function wireDrop(el, onFiles, hoverCls = 'over') {
+  el.addEventListener('dragover', (e) => { if (!hasFiles(e)) return; e.preventDefault(); el.classList.add(hoverCls); });
+  el.addEventListener('dragleave', (e) => { if (!el.contains(e.relatedTarget)) el.classList.remove(hoverCls); });
+  el.addEventListener('drop', (e) => { if (!hasFiles(e)) return; e.preventDefault(); el.classList.remove(hoverCls); onFiles([...e.dataTransfer.files]); });
+}
+wireDrop(els.filesDrop, (files) => files.forEach((f) => uploadPdf(f, { kind: 'attachment', job_id: state.notesJobId, title: nameFromFile(f) })));
+els.jobList.addEventListener('dragover', (e) => {
+  if (!hasFiles(e)) return;
+  const row = e.target.closest('.job-row[data-id]:not(.company)');
+  els.jobList.querySelectorAll('.job-row.drop-file').forEach((r) => { if (r !== row) r.classList.remove('drop-file'); });
+  if (state.tab === 'resumes') { e.preventDefault(); els.jobList.classList.add('drop-resume'); return; }
+  if (!row) return;
+  e.preventDefault();
+  row.classList.add('drop-file');
+});
+els.jobList.addEventListener('dragleave', (e) => {
+  if (!els.jobList.contains(e.relatedTarget)) { els.jobList.querySelectorAll('.drop-file').forEach((r) => r.classList.remove('drop-file')); els.jobList.classList.remove('drop-resume'); }
+});
+els.jobList.addEventListener('drop', (e) => {
+  if (!hasFiles(e)) return;
+  e.preventDefault();
+  els.jobList.classList.remove('drop-resume');
+  const files = [...e.dataTransfer.files];
+  if (state.tab === 'resumes') { openDocModal(null, files[0]); return; }
+  const row = e.target.closest('.job-row[data-id]:not(.company)');
+  els.jobList.querySelectorAll('.drop-file').forEach((r) => r.classList.remove('drop-file'));
+  if (!row || !entryOf(row.dataset.id, 'job')) return;
+  files.forEach((f) => uploadPdf(f, { kind: 'attachment', job_id: row.dataset.id, title: nameFromFile(f) }));
+});
+// Dropping a file anywhere else shouldn't navigate away from the app.
+window.addEventListener('dragover', (e) => { if (hasFiles(e)) e.preventDefault(); });
+window.addEventListener('drop', (e) => { if (hasFiles(e)) e.preventDefault(); });
+
+// Resumes tab
+function resumeRow(d) {
+  const n = usedFor(d);
+  return `
+    <article class="doc-row${d.is_default ? ' is-default' : ''}" data-doc-id="${escapeHtml(d.id)}">
+      <span class="pdf-tile">${PDF_ICON}</span>
+      <div class="doc-text">
+        <button type="button" class="doc-title" data-doc-open title="Open ${escapeHtml(d.title)}">${escapeHtml(d.title)}</button>
+        <div class="doc-sub"><span class="mini-avatar ${userClass(d.uploaded_by)}">${escapeHtml((d.uploaded_by || '?')[0])}</span>${escapeHtml(d.uploaded_by || '')} · ${relDate(d.uploaded_at)} · ${fileSize(d.size_bytes)}${n ? ` · <span class="doc-used">Sent for ${plural(n, 'job')}</span>` : ''}</div>
+      </div>
+      <button type="button" class="star-btn${d.is_default ? ' on' : ''}" data-doc-default aria-pressed="${d.is_default}" title="${d.is_default ? `Go-to resume for ${escapeHtml(d.role_tag)}` : `Make this the go-to for ${escapeHtml(d.role_tag)}`}">${d.is_default ? '★ Go-to' : '☆ Make go-to'}</button>
+      <div class="actions">
+        <button type="button" class="btn ghost small" data-doc-open>Open ↗</button>
+        <button type="button" class="btn ghost small" data-doc-download>Download</button>
+        <button type="button" class="btn ghost small menu-btn" data-doc-menu aria-label="More for ${escapeHtml(d.title)}" title="More">${MENU_ICON}</button>
+      </div>
+    </article>`;
+}
+function renderResumes() {
+  const list = resumeDocs();
+  const ups = state.uploads.filter((u) => u.kind === 'resume' && !u.replacing);
+  const bar = `<div class="subfilters co-bar res-bar"><span class="res-hint">Standard resumes you both use. Drop a PDF here to add one.</span><button class="btn primary small co-new" data-doc-new>+ Upload resume</button></div>`;
+  if (!list.length && !ups.length) {
+    return { html: `${bar}<label class="dropzone res-empty" data-doc-new><span class="dz-main"><b>Add your first resume</b></span><span class="dz-sub">e.g. Chief of Staff, Operations Management · PDF up to 10 MB</span></label>`, empty: null };
+  }
+  const roles = [...new Set([...list.map((d) => d.role_tag), ...ups.map((u) => u.role_tag)])]
+    .sort((a, b) => list.filter((d) => d.role_tag === b).length - list.filter((d) => d.role_tag === a).length || a.localeCompare(b));
+  let html = bar;
+  roles.forEach((role) => {
+    const docs = list.filter((d) => d.role_tag === role).sort((a, b) => (b.is_default - a.is_default) || new Date(b.uploaded_at) - new Date(a.uploaded_at));
+    const pending = ups.filter((u) => u.role_tag === role);
+    html += group(`${escapeHtml(role)} · ${docs.length + pending.length}`, docs.some((d) => d.is_default) ? '★ marks the go-to' : 'Star one as the go-to', 'role',
+      pending.map((u) => `<ul class="files-list in-tab">${uploadBar(u)}</ul>`).join('') + docs.map(resumeRow).join(''));
+  });
+  return { html };
+}
+
+// Modal: upload a new resume, or rename/replace any file.
+function roleChoices() {
+  return [...new Set([...ROLE_PRESETS, ...resumeDocs().map((d) => d.role_tag)])];
+}
+function openDocModal(doc = null, file = null) {
+  if (!state.user) { chooseUser(); return; }
+  state.docEdit = doc;
+  state.docFile = null;
+  const isResume = !doc || doc.kind === 'resume';
+  els.docModalTitle.textContent = doc ? (isResume ? 'Edit resume' : 'Edit file') : 'Upload a resume';
+  els.docModalSub.textContent = doc ? 'Rename it, or drop a new PDF to replace the file.' : 'Both of you can open it from anywhere.';
+  els.docRoleField.classList.toggle('hidden', !isResume);
+  els.docTitle.value = doc ? doc.title : '';
+  els.docRole.value = doc ? (doc.role_tag || '') : '';
+  els.docRoleChips.innerHTML = roleChoices().map((r) => `<button type="button" class="reason-chip${r === els.docRole.value ? ' active' : ''}" data-role="${escapeHtml(r)}">${escapeHtml(r)}</button>`).join('');
+  els.docRoleList.innerHTML = roleChoices().map((r) => `<option value="${escapeHtml(r)}"></option>`).join('');
+  els.saveDoc.textContent = doc ? 'Save' : 'Upload';
+  els.docErr.textContent = '';
+  setDocFile(file);
+  els.docModal.classList.remove('hidden');
+  setTimeout(() => (doc || file ? els.docTitle : els.docDrop).focus(), 30);
+}
+function setDocFile(file) {
+  state.docFile = file || null;
+  els.docDrop.classList.toggle('has-file', !!file);
+  els.docDropText.innerHTML = file
+    ? `${PDF_ICON}<b>${escapeHtml(file.name)}</b> · ${fileSize(file.size)} <u>change</u>`
+    : state.docEdit ? '<b>Drop a new PDF</b> to replace the file, or <u>browse</u>' : '<b>Drop a PDF</b> here or <u>browse</u>';
+  if (file && !els.docTitle.value.trim()) els.docTitle.value = nameFromFile(file);
+  const problem = file ? checkPdf(file) : '';
+  els.docErr.textContent = problem;
+}
+function closeDocModal() { els.docModal.classList.add('hidden'); state.docEdit = null; state.docFile = null; els.docFile.value = ''; }
+els.closeDocModal.addEventListener('click', closeDocModal);
+els.cancelDoc.addEventListener('click', closeDocModal);
+els.docModal.addEventListener('mousedown', (e) => { if (e.target === els.docModal) closeDocModal(); });
+els.docFile.addEventListener('change', () => setDocFile(els.docFile.files[0]));
+wireDrop(els.docDrop, (files) => setDocFile(files[0]));
+els.docRoleChips.addEventListener('click', (e) => {
+  const chip = e.target.closest('[data-role]');
+  if (!chip) return;
+  els.docRole.value = chip.dataset.role;
+  els.docRoleChips.querySelectorAll('.reason-chip').forEach((c) => c.classList.toggle('active', c === chip));
+});
+els.docRole.addEventListener('input', () => els.docRoleChips.querySelectorAll('.reason-chip').forEach((c) => c.classList.toggle('active', c.dataset.role === els.docRole.value.trim())));
+els.docForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const doc = state.docEdit;
+  const file = state.docFile;
+  const title = els.docTitle.value.replace(/\s+/g, ' ').trim();
+  const role = els.docRole.value.replace(/\s+/g, ' ').trim();
+  const isResume = !doc || doc.kind === 'resume';
+  if (!doc && !file) { els.docErr.textContent = 'Choose a PDF first.'; return; }
+  if (file && checkPdf(file)) { els.docErr.textContent = checkPdf(file); return; }
+  if (!title) { els.docErr.textContent = 'Give it a name.'; els.docTitle.focus(); return; }
+  if (isResume && !role) { els.docErr.textContent = 'Pick the role it’s for.'; els.docRole.focus(); return; }
+  closeDocModal();
+  if (!doc) { uploadPdf(file, { kind: 'resume', title, role_tag: role }); return; }
+  const patch = { title };
+  if (isResume && role !== doc.role_tag) { patch.role_tag = role; patch.is_default = false; }
+  if (title !== doc.title || patch.role_tag) mutate(doc.id, patch, { action: 'edit', title, ...(isResume ? { role_tag: role } : {}) }, 'files');
+  if (file) replacePdf(doc, file);
+});
+
+function openDocMenu(doc, anchor, point) {
+  showRowMenu(doc.id, 'doc', `<button role="menuitem" class="menu-item" data-menu="doc-open">Open</button><button role="menuitem" class="menu-item" data-menu="doc-download">Download</button><button role="menuitem" class="menu-item" data-menu="doc-edit">Rename or replace…</button>${doc.kind === 'resume' && !doc.is_default ? '<button role="menuitem" class="menu-item" data-menu="doc-default">Make go-to</button>' : ''}<div class="menu-sep"></div><button role="menuitem" class="menu-item danger" data-menu="doc-delete">Delete…</button>`, anchor, point);
+}
+function docMenuAction(doc, item) {
+  const what = item.dataset.menu;
+  if (what === 'doc-delete') { if (!confirmTwice(item, 'Click again to delete')) return; closeRowMenu(); deleteDoc(doc); return; }
+  closeRowMenu();
+  if (what === 'doc-open') openDoc(doc.id);
+  else if (what === 'doc-download') openDoc(doc.id, true);
+  else if (what === 'doc-edit') openDocModal(doc);
+  else if (what === 'doc-default') setDefaultResume(doc);
+}
+// Clicks on file rows (Resumes tab and the side panel share the same buttons).
+function onDocClick(e) {
+  if (e.target.closest('[data-doc-new]')) { e.preventDefault(); openDocModal(); return true; }
+  const host = e.target.closest('[data-doc-id]');
+  if (!host) return false;
+  const doc = entryOf(host.dataset.docId, 'doc');
+  if (!doc) return true;
+  if (e.target.closest('[data-doc-open]')) { openDoc(doc.id); return true; }
+  if (e.target.closest('[data-doc-download]')) { openDoc(doc.id, true); return true; }
+  if (e.target.closest('[data-doc-default]')) { if (!doc.is_default) setDefaultResume(doc); return true; }
+  const m = e.target.closest('[data-doc-menu]');
+  if (m) {
+    if (els.rowMenu.dataset.id === doc.id && !els.rowMenu.classList.contains('hidden')) closeRowMenu(); else openDocMenu(doc, m);
+    return true;
+  }
+  return false;
+}
+els.filesList.addEventListener('click', onDocClick);
 
 /* ---------- Colour theme + mode ---------- */
 // Palette (data-palette) and mode (data-theme: light | dark | unset = follow the device) are saved per browser.

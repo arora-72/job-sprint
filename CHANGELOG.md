@@ -4,6 +4,21 @@ Changes to Job Sprint are recorded here. The initial Git snapshot is `v1.0.0`. E
 
 ## Unreleased
 
+### PDFs: files on jobs + Resumes tab
+
+- New **Resumes** tab (after Companies) for your standard resumes. **+ Upload resume** (or drop a PDF on the tab), name it, and pick the role it's for: Chief of Staff, Operations Management, BizOps, Strategy & Operations, Product Ops, or your own. Resumes are grouped by role. Star one per role as the **go-to**. Open, Download, Rename or replace, and Delete (with Undo). Each resume shows how many jobs it was sent for.
+- Every job's notes panel is now **Notes & files**. Pick the **Resume sent** from your library, and attach PDFs (cover letter, JD, offer) by dropping them in or browsing. You can also drop a PDF straight onto a job row.
+- The notes button on each row shows a 📎 count when a job has files.
+- Files are PDFs up to 10 MB, kept in a private Supabase Storage bucket. The page only gets short-lived links (10 minutes) to view or upload one file. Deleted files can be undone for a day, then they're removed.
+- Database: new `documents` table, a `resume_id` column on jobs, and the private `documents` bucket (`supabase/files.sql`), with a backup of jobs first (`backup.jobs_before_files`). New server function: `files`.
+
+### Tidier rows
+
+- On tablets and smaller laptops (721–1000 px wide), the company keeps its own column instead of moving under the role.
+- The "On hold: …" note no longer repeats under the hold pill.
+- Long multi-city locations stay on one line; hover to see all of them.
+- Tabs stay on one line and scroll sideways when space runs out. "Last refreshed" hides below 1180 px (the refresh button stays).
+
 ### On hold (To apply)
 
 - Put a To apply job **on hold** when you're waiting on something before applying: ⋯ → **Put on hold…**, then pick *Asked for referral*, *Coffee chats in progress*, *Waiting on contact*, or type your own reason. The reason is also logged in the job's notes.

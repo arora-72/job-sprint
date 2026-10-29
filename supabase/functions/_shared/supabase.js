@@ -37,3 +37,27 @@ export async function supabase(path, { method = 'GET', body, headers = {} } = {}
   if (!res.ok) throw new Error(data?.message || data?.hint || `Supabase request failed (${res.status})`);
   return data;
 }
+
+// Supabase Storage (files). Same server key; paths are relative to /storage/v1/.
+export async function storage(path, { method = 'GET', body, headers = {} } = {}) {
+  const url = env('SUPABASE_URL');
+  const key = secretKey();
+  if (!url || !key) throw new Error('Missing SUPABASE_URL or a server key.');
+  const res = await fetch(`${url}/storage/v1/${path}`, {
+    method,
+    headers: {
+      apikey: key,
+      ...(key.startsWith('eyJ') ? { Authorization: `Bearer ${key}` } : {}),
+      'Content-Type': 'application/json',
+      ...headers,
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const text = await res.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = { message: text }; }
+  if (!res.ok) throw new Error(data?.message || data?.error || `Storage request failed (${res.status})`);
+  return data;
+}
+
+export function projectUrl() { return env('SUPABASE_URL'); }

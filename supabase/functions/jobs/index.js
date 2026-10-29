@@ -19,7 +19,7 @@ const CLEARED_NETWORK = {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const JOB_COLUMNS = ['id', 'company', 'title', 'location', 'url', 'status', 'added_by', 'added_at', 'applied_by', 'applied_at',
   'blocked_by', 'blocked_at', 'blocked_reason', 'assigned_to', 'network_status', 'network_updated_by', 'network_updated_at',
-  'network_closed_by', 'network_closed_at', 'notes', 'priority', 'hold_reason', 'hold_since', 'hold_by', 'updated_at'];
+  'network_closed_by', 'network_closed_at', 'notes', 'priority', 'hold_reason', 'hold_since', 'hold_by', 'resume_id', 'updated_at'];
 
 const isPriority = (v) => typeof v === 'number' && Number.isFinite(v) && Math.abs(v) < 1e12;
 
@@ -45,6 +45,7 @@ function cleanRestoredJob(row) {
   if (out.priority != null && !isPriority(out.priority)) return { error: 'Invalid priority.' };
   if (out.hold_reason != null && !str(out.hold_reason, HOLD_REASON_MAX)) return { error: 'Invalid hold reason.' };
   if (!when(out.hold_since) || !who(out.hold_by)) return { error: 'Invalid hold.' };
+  if (out.resume_id != null && !UUID.test(out.resume_id)) return { error: 'Invalid resume.' };
   return { row: out };
 }
 
@@ -171,6 +172,14 @@ async function handlePatch(body) {
       : { notes: notes.length >= NOTE_MAX_COUNT ? notes : [...notes, note] }),
     { hold_reason: reason, hold_since: now, hold_by: actor });
     return result.error || json(200, { job: result.job, note });
+  }
+
+  // Which standard resume was sent for this job (from the Resumes tab), or null to clear it.
+  if (action === 'resume') {
+    const rid = body.resume_id;
+    if (rid !== null && !UUID.test(rid || '')) return bad('Invalid resume.');
+    const job = await patchJob(byId(id), { resume_id: rid, updated_at: now });
+    return job ? json(200, { job }) : json(404, { error: 'Job not found.' });
   }
 
   if (action === 'unhold') {
