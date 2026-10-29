@@ -4,6 +4,12 @@ Changes to Job Sprint are recorded here. The initial Git snapshot is `v1.0.0`. E
 
 ## Unreleased
 
+### Smoother updates, aligned rows, weekly chart
+
+- **No more repeated refreshes.** One click (Applied, a note, an outcome) used to rebuild the list 8 times and re-download everything (jobs, Discover, companies, to-dos, files). Now it rebuilds once and re-reads only what changed, a moment after you finish. Background reloads wait while a menu is open, and the list is only redrawn when something on it actually changed. Rows fade in on first load only.
+- **Aligned rows.** Every job row now uses the same column widths, so the company and the buttons line up on every row and every tab, at every screen size. Block and Resume are the same width, so Open, Block/Resume, Applied and ⋯ line up down the list. On wide screens "Added" (or the networking status) sits under the role title, which gives the role about 200 px more room.
+- **Weekly chart on Analytics.** The top of Analytics shows applications this week together (vs the 50 goal), each person's count and goal days, and a filled line of weekly totals since you started, with the goal line. Hover a week for the split.
+
 ### Word files
 
 - Resumes and job files now accept **Word (.docx)** as well as PDF, up to 10 MB. Word files show a blue tile; PDFs stay red.

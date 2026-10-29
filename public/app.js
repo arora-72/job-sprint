@@ -367,9 +367,31 @@ async function refreshAll({ silent = false, afterAction = false } = {}) {
   }
 }
 
+// After a save, re-read only what that save touched (to pick up the other person's changes),
+// once, shortly after the last save settles. A full refresh still runs on load, on the
+// refresh button, and every few minutes while the page is open.
+const pendingReload = new Set();
+let reloadTimer = null;
+function refreshAfterWrite(...colls) {
+  colls.forEach((c) => pendingReload.add(c));
+  clearTimeout(reloadTimer);
+  reloadTimer = setTimeout(runReload, 600);
+}
+// Background reloads wait while a menu is open, so the page never shifts under your pointer.
+const menuOpen = () => !els.rowMenu.classList.contains('hidden');
+async function runReload() {
+  if (state.inflight.size || state.refreshPromise || state.uploads.length || menuOpen()) { reloadTimer = setTimeout(runReload, 600); return; }
+  const colls = [...pendingReload];
+  pendingReload.clear();
+  const loaders = { jobs: loadJobs, companies: loadCompanies, todos: loadTodos, files: loadDocs, discover: loadDiscover };
+  const results = await Promise.all(colls.map((c) => (loaders[c] ? loaders[c]({ silent: true }) : true)));
+  if (results.every(Boolean)) state.lastSync = new Date();
+  render();
+}
+
 function refreshIfDue() {
   if (document.visibilityState !== 'visible' || state.refreshPromise) return;
-  if (Date.now() - state.lastAttempt >= REFRESH_MS) refreshAll({ silent: true });
+  if (Date.now() - state.lastAttempt >= REFRESH_MS && !menuOpen()) refreshAll({ silent: true });
 }
 
 function scheduleAutoRefresh() {
@@ -1230,9 +1252,13 @@ function render() {
     empty = ['–', state.ownerFilter === 'none' ? 'Nothing unassigned here' : `Nothing for ${state.ownerFilter} here`, 'Switch to Everyone to see the rest.', false];
   }
   const focusGrip = document.activeElement?.closest?.('[data-prio-grip]') && document.activeElement.closest('.job-row')?.dataset.id;
-  els.jobList.innerHTML = html;
-  if (searching) highlightSearch();
-  if (focusGrip) els.jobList.querySelector(`.job-row[data-id="${CSS.escape(focusGrip)}"] [data-prio-grip]`)?.focus({ preventScroll: true });
+  // Only touch the list when something on it changed, so background reloads don't flicker.
+  const listKey = `${state.tab}|${state.query}|${html}`;
+  const rebuilt = listKey !== state.lastListKey;
+  if (rebuilt) { els.jobList.innerHTML = html; state.lastListKey = listKey; }
+  if (html && !els.jobList.classList.contains('settled')) requestAnimationFrame(() => setTimeout(() => els.jobList.classList.add('settled'), 300));
+  if (rebuilt && searching) highlightSearch();
+  if (rebuilt && focusGrip) els.jobList.querySelector(`.job-row[data-id="${CSS.escape(focusGrip)}"] [data-prio-grip]`)?.focus({ preventScroll: true });
   const showEmpty = !!empty && (searching ? state.loadedOnce : state.tab === 'resumes' ? state.docsLoaded : state.tab === 'discover' ? state.discoverLoaded : state.tab === 'companies' ? state.companiesLoaded : state.loadedOnce);
   els.emptyState.classList.toggle('hidden', !showEmpty);
   if (empty) {
@@ -1307,7 +1333,7 @@ els.jobList.addEventListener('click', async (event) => {
   } finally {
     state.discoverBusy.delete(id);
     render();
-    if (saved) refreshAll({ silent: true, afterAction: true });
+    if (saved) refreshAfterWrite('discover', 'jobs');
   }
 });
 
@@ -1347,17 +1373,14 @@ function mutate(id, local, body, coll = 'jobs') {
     .catch((err) => {
       if (state.inflight.get(id) === next) {
         Object.assign(job, before);
+        state.lastListKey = null; // a field the user changed (e.g. a dropdown) must snap back
         showToast(`Couldn't save: ${err.message}`, { error: true });
       }
     })
     .finally(() => {
       if (state.inflight.get(id) === next) state.inflight.delete(id);
       render();
-      if (saved) state.needsActionRefresh = true;
-      if (state.inflight.size === 0 && state.needsActionRefresh) {
-        state.needsActionRefresh = false;
-        refreshAll({ silent: true, afterAction: true });
-      }
+      if (saved) refreshAfterWrite(coll);
     });
   return next;
 }
@@ -1882,13 +1905,13 @@ async function deleteEntry(id, kind) {
         const res = await api(coll, { method: 'POST', body: JSON.stringify({ actor: state.user, restore: snapshot }) });
         putBack(res.job || res.company || snapshot);
         showToast(`Restored ${label}`);
-        refreshAll({ silent: true, afterAction: true });
+        refreshAfterWrite(coll);
       } catch (err) {
         showToast(`Couldn't restore: ${err.message}`, { error: true });
       }
     },
   });
-  refreshAll({ silent: true, afterAction: true });
+  refreshAfterWrite(coll);
 }
 
 /* ---------- Block dialog ---------- */
@@ -2024,7 +2047,7 @@ async function saveJob() {
     if (state.tab !== 'open' || state.filter === 'backlog') setView('open'); else render();
     showToast(`Added: ${title} at ${company}`);
     els.jobUrl.focus();
-    refreshAll({ silent: true, afterAction: true });
+    refreshAfterWrite('jobs');
   } catch (err) {
     showToast(err.message, { error: true });
   } finally {
@@ -3273,12 +3296,6 @@ function sectionHero(a) {
       <div class="an-rings">${USERS.map((u) => goalRing(u, todayN(u))).join('')}</div>
     </section>
     <section class="an-card">
-      <div class="an-h"><h3>This week</h3><span>Mon–${fmtDay(a.today, { weekday: 'short' })}</span></div>
-      <div class="an-big">${a.week.team}<small> / ${WEEK_GOAL * USERS.length}</small></div>
-      ${delta(a.week.team, a.lastWeek.team)}
-      <ul class="an-split">${USERS.map((u) => `<li><span class="mini-avatar ${userClass(u)}">${u[0]}</span>${u}<b>${a.week[u]}</b><span class="an-mini-bar"><i class="s-${userClass(u)}" style="width:${Math.min(100, Math.round((a.week[u] / WEEK_GOAL) * 100))}%"></i></span><em>${a.goalDays[u]}/${a.weekdaysSoFar} goal days</em></li>`).join('')}</ul>
-    </section>
-    <section class="an-card">
       <div class="an-h"><h3>Streak</h3><span>Days in a row applying</span></div>
       <ul class="an-streaks">${USERS.map((u) => { const s = a.streak(u); const best = a.bestStreak(u); return `<li><span class="mini-avatar ${userClass(u)}">${u[0]}</span><span class="an-flame${s ? '' : ' off'}">🔥</span><b>${s}</b><span>${s === 1 ? 'day' : 'days'}</span><em>${best > s ? `Best ${best}` : s ? 'Personal best!' : 'Apply today to start'}</em></li>`; }).join('')}</ul>
       <p class="an-foot">Weekends never break a streak.</p>
@@ -3458,10 +3475,62 @@ function sectionMix(a) {
   </section>`;
 }
 
+
+// Weekly applications, together: a filled line over the last 12 weeks (Mon–Sun), with the team goal.
+function sectionWeekly(a) {
+  const teamGoal = WEEK_GOAL * USERS.length;
+  const thisMon = mondayOf(a.today);
+  // Start at the first week with any applications (up to 12 weeks back, at least 4 shown).
+  const firstApplied = a.applied.reduce((m, j) => Math.min(m, new Date(j.applied_at).getTime()), Infinity);
+  const sinceFirst = Number.isFinite(firstApplied) ? Math.round((thisMon - mondayOf(firstApplied)) / (7 * DAY)) + 1 : 1;
+  const weeks = Math.max(4, Math.min(12, sinceFirst));
+  const data = Array.from({ length: weeks }, (_, i) => {
+    const mon = addDays(thisMon, -7 * (weeks - 1 - i));
+    const end = i === weeks - 1 ? a.today : addDays(mon, 6);
+    const per = {};
+    USERS.forEach((u) => { let n = 0; for (let d = mon; d <= end; d = addDays(d, 1)) n += a.on(u, d); per[u] = n; });
+    return { mon, per, total: USERS.reduce((t, u) => t + per[u], 0), current: i === weeks - 1 };
+  });
+  const W = 760; const H = 190; const top = 22; const bottom = 26; const left = 30; const right = 54;
+  const pw = W - left - right; const ph = H - top - bottom;
+  const max = Math.max(teamGoal * 1.15, ...data.map((d) => d.total)) || 1;
+  const xOf = (i) => left + (pw * i) / (weeks - 1);
+  const yOf = (v) => top + ph - (v / max) * ph;
+  const pts = data.map((d, i) => [xOf(i), yOf(d.total)]);
+  const line = pts.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`).join('');
+  const area = `${line}L${xOf(weeks - 1).toFixed(1)},${top + ph}L${xOf(0).toFixed(1)},${top + ph}Z`;
+  const gy = yOf(teamGoal).toFixed(1);
+  const grid = [0, Math.round(teamGoal / 2), teamGoal].map((v) => `<line x1="${left}" x2="${W - right}" y1="${yOf(v).toFixed(1)}" y2="${yOf(v).toFixed(1)}" class="${v === teamGoal ? 'an-goal' : 'an-grid'}"/><text x="${left - 6}" y="${(yOf(v) + 3.5).toFixed(1)}" text-anchor="end" class="an-axis">${v}</text>`).join('');
+  const every = weeks > 8 ? 2 : 1; // label every week, or every other week counting back from this one
+  const xl = data.map((d, i) => ((weeks - 1 - i) % every === 0 ? `<text x="${xOf(i).toFixed(1)}" y="${H - 7}" text-anchor="${i === 0 ? 'start' : i === weeks - 1 ? 'end' : 'middle'}" class="an-axis${d.current ? ' an-axis-now' : ''}">${d.current ? 'This week' : fmtDay(d.mon, { month: 'short', day: 'numeric' })}</text>` : '')).join('');
+  const dots = data.map((d, i) => {
+    const tip = `${d.current ? 'This week so far' : `Week of ${fmtDay(d.mon, { month: 'short', day: 'numeric' })}`} · ${d.total} applied (${USERS.map((u) => `${u} ${d.per[u]}`).join(', ')})${d.total >= teamGoal ? ' · goal hit ✓' : ` · goal ${teamGoal}`}`;
+    return `<circle cx="${pts[i][0].toFixed(1)}" cy="${pts[i][1].toFixed(1)}" r="${d.current ? 5 : 4}" class="an-dot${d.current ? ' now' : ''}"/><rect x="${(pts[i][0] - pw / (weeks - 1) / 2).toFixed(1)}" y="${top}" width="${(pw / (weeks - 1)).toFixed(1)}" height="${ph + bottom}" class="an-hit" data-tip="${escapeHtml(tip)}"/>`;
+  }).join('');
+  const last = data[weeks - 1]; const prev = data[weeks - 2];
+  const endLabel = `<text x="${(pts[weeks - 1][0] + 9).toFixed(1)}" y="${(pts[weeks - 1][1] + 4).toFixed(1)}" class="an-end-label">${last.total}</text>`;
+  const goalLabel = `<text x="${W - right + 9}" y="${(+gy + 3.5).toFixed(1)}" class="an-goal-label">goal ${teamGoal}</text>`;
+  const best = weeks > 1 ? Math.max(...data.slice(0, -1).map((d) => d.total)) : 0;
+  const pct = Math.min(100, Math.round((last.total / teamGoal) * 100));
+  return `<section class="an-card an-weekly">
+    <div class="an-weekly-head">
+      <div>
+        <h3>This week, together</h3>
+        <div class="an-big">${last.total}<small> of ${teamGoal} goal · ${pct}%</small></div>
+        <div class="an-weekly-split">${USERS.map((u) => `<span><span class="mini-avatar ${userClass(u)}">${u[0]}</span>${u} <b>${last.per[u]}</b><em>${a.goalDays[u]}/${a.weekdaysSoFar} goal days</em></span>`).join('')}${delta(a.week.team, a.lastWeek.team)}</div>
+      </div>
+      <p class="an-weekly-note">Last week: <b>${prev.total}</b> · best week: <b>${best}</b> · goal ${WEEK_GOAL} each (${DAILY_GOAL} a weekday)</p>
+    </div>
+    <svg viewBox="0 0 ${W} ${H}" class="an-weekly-chart" role="img" aria-label="Applications per week, together, last 12 weeks. This week ${last.total} of ${teamGoal}. Last week ${prev.total}.">
+      ${grid}<path d="${area}" class="an-area"/><path d="${line}" class="an-line"/>${goalLabel}${dots}${endLabel}${xl}
+    </svg>
+  </section>`;
+}
+
 function renderAnalytics() {
   if (!state.loadedOnce) return { html: '' };
   const a = analyticsData();
-  return { html: `<div class="analytics">${sectionHero(a)}${sectionLog(a)}${sectionDaily(a)}<div class="an-grid">${sectionHeatmap(a)}${sectionPipeline(a)}${sectionNetworking(a)}${sectionFunnel(a)}${sectionResumes(a)}${sectionMix(a)}</div></div>` };
+  return { html: `<div class="analytics">${sectionWeekly(a)}${sectionHero(a)}${sectionLog(a)}${sectionDaily(a)}<div class="an-grid">${sectionHeatmap(a)}${sectionPipeline(a)}${sectionNetworking(a)}${sectionFunnel(a)}${sectionResumes(a)}${sectionMix(a)}</div></div>` };
 }
 
 // Hover tooltips for charts (one floating box, follows the pointer).
