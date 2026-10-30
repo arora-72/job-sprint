@@ -1417,30 +1417,104 @@ function syncSound() {
   els.soundToggle.setAttribute('aria-label', label);
   els.soundToggle.setAttribute('title', label);
 }
-function playBell(big) {
+// Church bell, synthesized (no audio file). Every Applied click tolls a deep old-town bell three
+// times in a stone-church echo; the daily goal, team milestones and offers ring a fuller peal.
+// Real church bells are "inharmonic": hum, prime, minor-third tierce, quint, nominal and upper
+// partials, each fading at its own rate, and slightly detuned pairs give the slow shimmer.
+const BELL_PARTIALS = [ // [ratio to the nominal (strike note), loudness, seconds to fade]
+  [0.25, 0.42, 7.0], [0.5, 0.40, 5.5], [0.6, 0.32, 4.5], [0.75, 0.12, 3.2],
+  [1.0, 0.55, 3.8], [1.5, 0.16, 2.2], [2.0, 0.11, 1.8], [2.61, 0.05, 1.1],
+];
+const BELL_NOMINAL = 349; // F4 strike note: a big tenor bell (hum ~87 Hz)
+let bellReverb = null;
+let bellBus = null;
+function churchReverb(ctx) {
+  if (bellReverb) return bellReverb;
+  // A generated impulse response: ~4 s of decaying noise, darker as it fades, like a stone nave.
+  const secs = 4.2; const rate = ctx.sampleRate; const len = Math.floor(secs * rate);
+  const buf = ctx.createBuffer(2, len, rate);
+  for (let c = 0; c < 2; c += 1) {
+    const ch = buf.getChannelData(c);
+    let lp = 0;
+    for (let i = 0; i < len; i += 1) {
+      const t = i / rate;
+      const k = 0.35 + 0.6 * (t / secs); // more smoothing later = darker tail
+      lp += (Math.random() * 2 - 1 - lp) * (1 - k);
+      ch[i] = (t < 0.025 ? 0 : lp) * Math.pow(1 - t / secs, 2.4);
+    }
+  }
+  const conv = ctx.createConvolver();
+  conv.buffer = buf;
+  const wet = ctx.createGain(); wet.gain.value = 0.42;
+  conv.connect(wet); wet.connect(ctx.destination);
+  bellReverb = conv;
+  return conv;
+}
+function bellOutput(ctx) {
+  // One bus per peal, so a new Applied fades out a peal still ringing instead of piling on top of it.
+  if (bellBus) {
+    const old = bellBus;
+    old.gain.setTargetAtTime(0.0001, ctx.currentTime, 0.12);
+    setTimeout(() => { try { old.disconnect(); } catch { /* already gone */ } }, 1500);
+  }
+  const bus = ctx.createGain(); bus.gain.value = 1;
+  const tone = ctx.createBiquadFilter(); tone.type = 'lowpass'; tone.frequency.value = 5200;
+  bus.connect(tone);
+  const dry = ctx.createGain(); dry.gain.value = 0.85;
+  tone.connect(dry); dry.connect(ctx.destination);
+  tone.connect(churchReverb(ctx));
+  bellBus = bus;
+  return bus;
+}
+function strikeBell(ctx, out, when, nominal, level) {
+  BELL_PARTIALS.forEach(([ratio, amp, decay], i) => {
+    // The lowest partials come as slightly detuned pairs: that slow beat is the bell's "warble".
+    const detunes = i < 3 ? [0, 0.7 + i * 0.4] : [0];
+    detunes.forEach((dt) => {
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = nominal * ratio + dt;
+      const peak = (level * amp) / detunes.length;
+      g.gain.setValueAtTime(0.0001, when);
+      g.gain.exponentialRampToValueAtTime(peak, when + 0.004);
+      g.gain.exponentialRampToValueAtTime(peak * 0.55, when + 0.12); // quick drop after the clang
+      g.gain.exponentialRampToValueAtTime(0.0001, when + decay);
+      osc.connect(g); g.connect(out);
+      osc.start(when); osc.stop(when + decay + 0.05);
+    });
+  });
+  // The clapper's metallic "clang": a very short burst of filtered noise at the strike.
+  const n = Math.floor(ctx.sampleRate * 0.06);
+  const nb = ctx.createBuffer(1, n, ctx.sampleRate);
+  const d = nb.getChannelData(0);
+  for (let i = 0; i < n; i += 1) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 3);
+  const src = ctx.createBufferSource(); src.buffer = nb;
+  const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = nominal * 3; bp.Q.value = 2.5;
+  const ng = ctx.createGain(); ng.gain.value = level * 0.35;
+  src.connect(bp); bp.connect(ng); ng.connect(out);
+  src.start(when);
+}
+// tolls: how many times the big bell rings. big: a fuller peal (four bells descending, twice,
+// then the big bell) for the daily goal, team milestones and offers.
+function playBell(big = false, tolls = 3) {
   if (!soundOn()) return;
   try {
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
     audioCtx = audioCtx || new AC();
     if (audioCtx.state === 'suspended') audioCtx.resume();
-    const strike = (when, freq, level) => {
-      // Bell partials are not whole multiples of the base note, which is what makes it sound like metal.
-      [[1, 1, 2.4], [2.01, 0.45, 1.6], [2.76, 0.28, 1.1], [5.4, 0.12, 0.6]].forEach(([ratio, amp, decay]) => {
-        const osc = audioCtx.createOscillator();
-        const g = audioCtx.createGain();
-        osc.type = 'sine';
-        osc.frequency.value = freq * ratio;
-        g.gain.setValueAtTime(0.0001, when);
-        g.gain.exponentialRampToValueAtTime(level * amp, when + 0.006);
-        g.gain.exponentialRampToValueAtTime(0.0001, when + decay);
-        osc.connect(g); g.connect(audioCtx.destination);
-        osc.start(when); osc.stop(when + decay + 0.05);
-      });
-    };
-    const t = audioCtx.currentTime + 0.02;
-    strike(t, 880, 0.22);
-    if (big) strike(t + 0.16, 1318.5, 0.2); // milestone: a second, higher strike
+    const out = bellOutput(audioCtx);
+    let t = audioCtx.currentTime + 0.03;
+    if (big) {
+      const ring = [698.5, 587.3, 523.3, 440]; // F5 D5 C5 A4, rung "in rounds"
+      for (let round = 0; round < 2; round += 1) {
+        ring.forEach((f, i) => strikeBell(audioCtx, out, t + i * 0.42, f, 0.16));
+        t += ring.length * 0.42 + 0.25;
+      }
+      t += 0.2;
+    }
+    for (let i = 0; i < tolls; i += 1) strikeBell(audioCtx, out, t + i * 1.45, BELL_NOMINAL, 0.3 - i * 0.03);
   } catch { /* sound is a nicety; never block applying */ }
 }
 // Soft, short tick for checking off a to-do. Same mute button as the bell.
@@ -1468,7 +1542,7 @@ function playTick() {
 els.soundToggle.addEventListener('click', () => {
   store.set('jobSprintSound', soundOn() ? 'off' : 'on');
   syncSound();
-  playBell(false); // audible confirmation when turning on; silent when muting
+  playBell(false, 1); // one toll to confirm when turning on; silent when muting
 });
 syncSound();
 
@@ -1554,10 +1628,11 @@ els.jobList.addEventListener('click', (e) => {
   if (action === 'apply') {
     setStatus(id, 'applied');
     const today = buckets().appliedToday.length;
-    playBell(today in CHEER);
-    celebrate(btn, today in CHEER);
     const total = state.jobs.filter((j) => j.applied_at).length;
     const mine = (buckets().appliedToday || []).filter((j) => j.applied_by === state.user).length;
+    // Every application tolls the church bell; your daily goal or a team milestone rings a full peal.
+    playBell(MILESTONES.includes(total) || mine === DAILY_GOAL);
+    celebrate(btn, today in CHEER);
     const msg = MILESTONES.includes(total) ? `🎉 Team milestone: ${total} applications!`
       : mine === DAILY_GOAL ? `🎯 Daily goal hit: ${DAILY_GOAL} today.`
         : CHEER[today] || 'Applied ·';

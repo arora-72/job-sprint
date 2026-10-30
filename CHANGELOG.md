@@ -4,6 +4,12 @@ Changes to Job Sprint are recorded here. The initial Git snapshot is `v1.0.0`. E
 
 ## Unreleased
 
+### Church bell on every application
+
+- Every **Applied** click now tolls a deep old-town church bell three times, with a stone-church echo (synthesized in the browser, no audio file). It uses real bell partials (hum, prime, minor-third tierce, quint, nominal) with a slow shimmer.
+- Hitting your **daily goal (5)** or a **team milestone** rings a fuller peal first: four bells rung in rounds, twice, then the big bell. Offers do too.
+- A new Applied while a peal is still ringing fades the old one out instead of piling up. The mute button works as before; turning sound on tolls once.
+
 ### Adjustable trend chart (Analytics)
 
 - The top of Analytics is now one adjustable chart with a line for **Garima** and **Indresh**, and an optional dashed **Together** line. Tap the chips to show or hide each.
