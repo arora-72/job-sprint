@@ -2359,17 +2359,21 @@ function renderTodos() {
   els.todoDraft.innerHTML = d ? `<span class="tchip">${coTile(tagCompany(d.label, entryOf(d.id, d.kind)), true)}<span class="tchip-text">${escapeHtml(d.label)}</span><button type="button" class="tdraft-x" data-todo-draft-clear aria-label="Don’t link ${escapeHtml(d.label)}">×</button></span>` : '';
   if (state.todoDrag || state.todoEditing) return; // don't rebuild the list under the pointer or the edit box
 
-  if (!state.todosLoaded) { els.todoOpenList.innerHTML = '<li class="tempty">Loading…</li>'; els.todoDoneWrap.innerHTML = ''; return; }
+  if (!state.todosLoaded) { els.todoOpenList.innerHTML = '<li class="tempty">Loading…</li>'; els.todoDoneWrap.innerHTML = ''; state.lastTodoOpenHtml = null; state.lastTodoDoneHtml = null; return; }
   // Rebuilding the list would drop keyboard focus, so remember which control had it.
   const active = document.activeElement;
   const focusId = active && els.todoScroll.contains(active) ? active.closest('.todo')?.dataset.todoId : null;
   const focusPart = focusId ? ['data-todo-grip', 'data-todo-check', 'data-todo-menu', 'data-todo-link'].find((a) => active.hasAttribute(a)) : null;
-  els.todoOpenList.innerHTML = lists.open.length
+  const openHtml = lists.open.length
     ? lists.open.map(todoItemHtml).join('')
     : `<li class="tempty">${lists.done.length ? 'All clear. Nice work.' : yours ? 'Nothing on your plate yet. Add the next thing you’ll do.' : `${view}’s list is empty. Anything you add here goes to ${view}.`}</li>`;
-  els.todoDoneWrap.innerHTML = lists.done.length ? `
+  // Like the job list: only redraw when something changed, so background reloads never swap
+  // items out from under the pointer.
+  if (openHtml !== state.lastTodoOpenHtml) { els.todoOpenList.innerHTML = openHtml; state.lastTodoOpenHtml = openHtml; }
+  const doneHtml = lists.done.length ? `
     <button type="button" class="tdone-head" data-todo-done-toggle aria-expanded="${!state.todoDoneCollapsed}"><span class="chev${state.todoDoneCollapsed ? ' shut' : ''}" aria-hidden="true">▾</span>Done · ${lists.done.length}<span class="clear">Clears after ${TODO_DONE_DAYS} days</span></button>
     ${state.todoDoneCollapsed ? '' : `<ul class="tlist" aria-label="Done">${lists.done.map(todoItemHtml).join('')}</ul>`}` : '';
+  if (doneHtml !== state.lastTodoDoneHtml) { els.todoDoneWrap.innerHTML = doneHtml; state.lastTodoDoneHtml = doneHtml; }
   if (focusId && focusPart) els.todoScroll.querySelector(`.todo[data-todo-id="${CSS.escape(focusId)}"] [${focusPart}]`)?.focus({ preventScroll: true });
 }
 
@@ -2455,6 +2459,7 @@ function toggleTodo(id) {
 }
 
 function startTodoEdit(id) {
+  state.lastTodoOpenHtml = null; state.lastTodoDoneHtml = null; // this edits the list directly, so the next render must redraw it
   const li = els.todoDrawer.querySelector(`.todo[data-todo-id="${CSS.escape(id)}"]`);
   const t = state.todos.find((x) => x.id === id);
   if (!li || !t || t.done) return;
@@ -2516,6 +2521,7 @@ function moveTodo(id, index) {
 
 // Drag to reorder: pointer events so it works with a mouse and on phones.
 function startTodoDrag(e, grip) {
+  state.lastTodoOpenHtml = null; state.lastTodoDoneHtml = null; // this edits the list directly, so the next render must redraw it
   const li = grip.closest('.todo');
   const ul = els.todoOpenList;
   const items = [...ul.querySelectorAll('.todo')];
