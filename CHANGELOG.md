@@ -4,6 +4,15 @@ Changes to Job Sprint are recorded here. The initial Git snapshot is `v1.0.0`. E
 
 ## Unreleased
 
+### Notes tab
+
+- A new **Notes** tab holds notes shared between Garima and Indresh, shown as a **card grid** (Keep style) or a **list**. Switch with Grid/List; the choice is remembered per browser.
+- **Templates:** Interview prep, STAR story, Company research, Coffee chat, or a blank note. Formatting covers headings, bold, italic, bullet and numbered lists, checklists and links. Markdown shortcuts work too (`- `, `1. `, `[] `, `# `, `## `).
+- Notes **autosave** as you type. If you both edit the same note, nothing is overwritten: the second save shows the other person's version and asks **Use their version** or **Keep mine**.
+- Pin, colour, labels (with filter chips), and **link a note to a job or company**. Linked notes appear in that job's panel, which also has **+ New note for this job**.
+- Notes show up in search. Deleting moves a note to **Trash** with Undo, where it stays for 30 days.
+- Pasted content is cleaned on the server and in the browser, so only plain formatting survives.
+
 ### Church bell on every application
 
 - Every **Applied** click now tolls a deep old-town church bell three times, with a stone-church echo (synthesized in the browser, no audio file). It uses real bell partials (hum, prime, minor-third tierce, quint, nominal) with a slow shimmer.
