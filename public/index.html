@@ -266,6 +266,7 @@
           <button class="tab" role="tab" aria-selected="false" data-tab="networking">Networking <span id="networkingCount" class="count-badge">0</span></button>
           <button class="tab" role="tab" aria-selected="false" data-tab="companies">Companies <span id="companiesCount" class="count-badge">0</span></button>
           <button class="tab" role="tab" aria-selected="false" data-tab="resumes">Resumes <span id="resumesCount" class="count-badge">0</span></button>
+          <button class="tab" role="tab" aria-selected="false" data-tab="notes">Notes <span id="notesTabCount" class="count-badge">0</span></button>
           <button class="tab" role="tab" aria-selected="false" data-tab="history">History <span id="historyCount" class="count-badge">0</span></button>
           <button class="tab" role="tab" aria-selected="false" data-tab="analytics">Analytics</button>
           <button class="tab" role="tab" aria-selected="false" data-tab="discover">Discover <span id="discoverCount" class="count-badge">0</span></button>
@@ -324,6 +325,47 @@
     </div>
   </aside>
 
+  <!-- Notes tab editor -->
+  <div id="noteEdBackdrop" class="drawer-backdrop hidden"></div>
+  <aside id="noteEd" class="drawer note-ed hidden" role="dialog" aria-modal="true" aria-label="Note">
+    <div class="ned-top">
+      <span id="nedStatus" class="ned-status" role="status" aria-live="polite"></span>
+      <div class="ned-actions">
+        <button type="button" id="nedPin" class="icon-btn" aria-pressed="false" title="Pin to the top" aria-label="Pin"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5M9 3h6l-1 6 4 3v2H6v-2l4-3z"/></svg></button>
+        <div class="ned-colors" id="nedColors" role="radiogroup" aria-label="Colour"></div>
+        <button type="button" id="nedMore" class="icon-btn" aria-label="More" title="More"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg></button>
+        <button type="button" id="nedClose" class="icon-btn" aria-label="Close note" title="Close (Esc)">×</button>
+      </div>
+    </div>
+    <div id="nedConflict" class="ned-conflict hidden" role="alert"></div>
+    <div class="ned-scroll">
+      <input id="nedTitle" class="ned-title" type="text" maxlength="200" placeholder="Title" aria-label="Title" autocomplete="off" />
+      <div class="ned-meta">
+        <div id="nedLabels" class="ned-labels"></div>
+        <input id="nedLabelInput" class="ned-label-input" type="text" maxlength="40" placeholder="+ Label" aria-label="Add a label" list="nedLabelList" autocomplete="off" />
+        <datalist id="nedLabelList"></datalist>
+        <span id="nedLink" class="ned-link"></span>
+        <span class="ned-linkpick-wrap">
+          <input id="nedLinkInput" class="ned-label-input" type="text" placeholder="@ Link a job or company" aria-label="Link a job or company" autocomplete="off" />
+          <ul id="nedLinkSuggest" class="tsuggest ned-suggest hidden" role="listbox"></ul>
+        </span>
+      </div>
+      <div class="ned-toolbar" role="toolbar" aria-label="Formatting">
+        <button type="button" data-fmt="h2" title="Heading (type # then space)"><b>H</b></button>
+        <button type="button" data-fmt="h3" title="Subheading (## then space)"><b>h</b></button>
+        <button type="button" data-fmt="bold" title="Bold (Ctrl/⌘+B)"><b>B</b></button>
+        <button type="button" data-fmt="italic" title="Italic (Ctrl/⌘+I)"><i>I</i></button>
+        <span class="ned-sep"></span>
+        <button type="button" data-fmt="ul" title="Bullets (type - then space)">• List</button>
+        <button type="button" data-fmt="ol" title="Numbers (type 1. then space)">1. List</button>
+        <button type="button" data-fmt="todo" title="Checklist (type [] then space)">☑ Checklist</button>
+        <button type="button" data-fmt="link" title="Link (select text first)">🔗 Link</button>
+      </div>
+      <div id="nedBody" class="ned-body" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Note" data-placeholder="Start writing… Type - for bullets, [] for a checklist, # for a heading."></div>
+    </div>
+    <div class="ned-foot" id="nedFoot"></div>
+  </aside>
+
   <div id="notesBackdrop" class="drawer-backdrop hidden"></div>
   <aside id="notesDrawer" class="drawer hidden" role="dialog" aria-modal="true" aria-labelledby="notesTitle">
     <div class="drawer-head">
@@ -351,6 +393,7 @@
         <select id="resumeSent"></select>
         <button type="button" id="resumeSentOpen" class="btn ghost small hidden">Open ↗</button>
       </div>
+      <div id="linkedNotes" class="linked-notes"></div>
       <ul id="filesList" class="files-list"></ul>
       <label class="dropzone" id="filesDrop">
         <input type="file" id="filesInput" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" multiple />

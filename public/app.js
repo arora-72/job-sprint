@@ -56,6 +56,10 @@ const state = {
   todoDoneCollapsed: store.get('jobSprintTodoDone') === 'collapsed',
   openView: store.get('jobSprintOpenView') === 'date' ? 'date' : 'priority', // To apply: 'priority' | 'date'
   prioDrag: null,       // drag state while reordering To apply
+  notes: [],            // Notes tab (shared)
+  notesLoaded: false,
+  noteFilter: 'all',    // 'all' | a label | 'trash'
+  ned: null,            // the note open in the editor: { id, base, rev, savedRev, timer }
   docs: [],             // PDFs: standard resumes + files attached to jobs (metadata only)
   docsLoaded: false,
   uploads: [],          // uploads in progress: { tmp, kind, job_id, title, role_tag, progress }
@@ -79,6 +83,7 @@ const els = {};
   'filterChip', 'filterChipText', 'syncText', 'refreshBtn', 'loadingState', 'emptyState', 'emptyIcon',
   'emptyTitle', 'emptyText', 'jobList', 'toast', 'toastText', 'toastUndo',
   'blockModal', 'blockJobName', 'blockReason', 'closeBlockModal', 'cancelBlock', 'confirmBlock', 'reasonChips',
+  'notesTabCount', 'noteEd', 'noteEdBackdrop', 'nedStatus', 'nedPin', 'nedColors', 'nedMore', 'nedClose', 'nedConflict', 'nedTitle', 'nedLabels', 'nedLabelInput', 'nedLabelList', 'nedLink', 'nedLinkInput', 'nedLinkSuggest', 'nedBody', 'nedFoot', 'linkedNotes',
   'resumesCount', 'filesSection', 'filesCount', 'resumeSent', 'resumeSentOpen', 'filesList', 'filesDrop', 'filesInput',
   'docModal', 'docForm', 'docModalTitle', 'docModalSub', 'closeDocModal', 'docDrop', 'docFile', 'docDropText', 'docTitle', 'docRoleField', 'docRoleChips', 'docRole', 'docRoleList', 'docErr', 'cancelDoc', 'saveDoc',
   'notesBackdrop', 'notesDrawer', 'notesTitle', 'notesSub', 'closeNotes', 'noteForm', 'noteInput', 'saveNote', 'notesList',
@@ -352,7 +357,7 @@ async function refreshAll({ silent = false, afterAction = false } = {}) {
   els.refreshBtn.disabled = true;
   state.refreshPromise = (async () => {
     // Companies load alongside, but a companies failure never marks the whole refresh as failed.
-    const [jobsOk, discoverOk] = await Promise.all([loadJobs({ silent }), loadDiscover({ silent }), loadCompanies({ silent }), loadTodos({ silent }), loadDocs({ silent })]);
+    const [jobsOk, discoverOk] = await Promise.all([loadJobs({ silent }), loadDiscover({ silent }), loadCompanies({ silent }), loadTodos({ silent }), loadDocs({ silent }), loadNotes({ silent })]);
     state.refreshError = !(jobsOk && discoverOk);
     if (!state.refreshError) state.lastSync = new Date();
     return !state.refreshError;
@@ -383,7 +388,7 @@ async function runReload() {
   if (state.inflight.size || state.refreshPromise || state.uploads.length || menuOpen()) { reloadTimer = setTimeout(runReload, 600); return; }
   const colls = [...pendingReload];
   pendingReload.clear();
-  const loaders = { jobs: loadJobs, companies: loadCompanies, todos: loadTodos, files: loadDocs, discover: loadDiscover };
+  const loaders = { jobs: loadJobs, companies: loadCompanies, todos: loadTodos, files: loadDocs, discover: loadDiscover, notes: loadNotes };
   const results = await Promise.all(colls.map((c) => (loaders[c] ? loaders[c]({ silent: true }) : true)));
   if (results.every(Boolean)) state.lastSync = new Date();
   render();
@@ -1110,7 +1115,7 @@ function renderDiscover() {
 
 // Everything on the current tab before the owner filter, so the filter bar can show honest counts.
 function tabBase() {
-  if (state.tab === 'discover' || state.tab === 'resumes' || state.tab === 'analytics') return null;
+  if (state.tab === 'discover' || state.tab === 'resumes' || state.tab === 'analytics' || state.tab === 'notes') return null;
   if (state.tab === 'companies') return state.companies;
   return state.jobs.filter((j) => stageOf(j) === state.tab);
 }
@@ -1168,13 +1173,15 @@ function renderSearch() {
   const open = hits('open'), net = hits('networking'), hist = hits('history');
   const cos = searchHits(state.companies, (c) => [c.name, c.source, (c.people || []).map((p) => p.name).join(' ')], terms);
   const disc = searchHits(state.discover, jobFields, terms);
-  const total = open.length + net.length + hist.length + cos.length + disc.length;
+  const nts = searchHits(liveNotes().map((n) => ({ ...n, added_at: n.updated_at })), (n) => [n.title, (n.labels || []).join(' '), noteText(n.body)], terms);
+  const total = open.length + net.length + hist.length + cos.length + disc.length + nts.length;
   let html = '';
   if (open.length) html += group(`To apply · ${open.length}`, 'Open roles', '', open.map((j) => openRow(j)).join(''));
   if (net.length) html += group(`Networking · ${net.length}`, 'Applied, still networking', '', net.map(networkRow).join(''));
   if (hist.length) html += group(`History · ${hist.length}`, 'Closed or blocked', '', hist.map(historyRow).join(''));
   if (cos.length) html += group(`Companies · ${cos.length}`, 'Tracked companies', '', cos.map(companyRow).join(''));
   if (disc.length) html += group(`Discover · ${disc.length}`, 'Matches to review', '', disc.map(discoverRow).join(''));
+  if (nts.length) html += group(`Notes · ${nts.length}`, 'Shared notes', '', `<div class="note-list in-search">${nts.map(noteListRow).join('')}</div>`);
   return { total, html, empty: total ? null : ['–', `No matches for “${state.query.trim()}”`, 'Try part of the role title or the company name.', false] };
 }
 function highlightSearch() {
@@ -1224,6 +1231,7 @@ function render() {
   els.networkingCount.textContent = b.networking.length;
   els.companiesCount.textContent = state.companies.filter(ownerMatch).length;
   els.resumesCount.textContent = resumeDocs().length;
+  els.notesTabCount.textContent = liveNotes().length;
   els.discoverCount.textContent = state.discover.length;
   els.historyCount.textContent = b.history.length;
   if (typeof syncTabFade === 'function') requestAnimationFrame(syncTabFade);
@@ -1242,7 +1250,7 @@ function render() {
   els.syncText.classList.toggle('sync-error', state.refreshError);
 
   // List
-  const renderers = { open: renderOpen, networking: renderNetworking, companies: renderCompanies, resumes: renderResumes, history: renderHistory, analytics: renderAnalytics, discover: renderDiscover };
+  const renderers = { notes: renderNotesTab, open: renderOpen, networking: renderNetworking, companies: renderCompanies, resumes: renderResumes, history: renderHistory, analytics: renderAnalytics, discover: renderDiscover };
   renderOwnerBar();
   let { html = '', empty = null, total = 0 } = searching ? renderSearch() : renderers[state.tab](b);
   if (searching) els.ownerBar.classList.add('hidden');
@@ -1259,7 +1267,7 @@ function render() {
   if (html && !els.jobList.classList.contains('settled')) requestAnimationFrame(() => setTimeout(() => els.jobList.classList.add('settled'), 300));
   if (rebuilt && searching) highlightSearch();
   if (rebuilt && focusGrip) els.jobList.querySelector(`.job-row[data-id="${CSS.escape(focusGrip)}"] [data-prio-grip]`)?.focus({ preventScroll: true });
-  const showEmpty = !!empty && (searching ? state.loadedOnce : state.tab === 'resumes' ? state.docsLoaded : state.tab === 'discover' ? state.discoverLoaded : state.tab === 'companies' ? state.companiesLoaded : state.loadedOnce);
+  const showEmpty = !!empty && (searching ? state.loadedOnce : state.tab === 'notes' ? state.notesLoaded : state.tab === 'resumes' ? state.docsLoaded : state.tab === 'discover' ? state.discoverLoaded : state.tab === 'companies' ? state.companiesLoaded : state.loadedOnce);
   els.emptyState.classList.toggle('hidden', !showEmpty);
   if (empty) {
     els.emptyIcon.textContent = empty[0];
@@ -1278,7 +1286,7 @@ function setView(tab, filter = null) {
   render();
   if (changed) document.querySelector(`.tab[data-tab="${tab}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   syncTabFade();
-  if ((tab === 'discover' && !state.discoverLoaded) || (tab === 'companies' && !state.companiesLoaded) || (tab === 'resumes' && !state.docsLoaded)) { if (!state.refreshPromise) refreshAll({ silent: true }); }
+  if ((tab === 'discover' && !state.discoverLoaded) || (tab === 'companies' && !state.companiesLoaded) || (tab === 'resumes' && !state.docsLoaded) || (tab === 'notes' && !state.notesLoaded)) { if (!state.refreshPromise) refreshAll({ silent: true }); }
 }
 document.querySelectorAll('.stat').forEach((s) => s.addEventListener('click', () => {
   const v = s.dataset.view;
@@ -1347,7 +1355,7 @@ function localPatch(status, reason) {
   return { status, applied_by: null, applied_at: null, blocked_by: null, blocked_at: null, blocked_reason: '', ...CLEARED_NETWORK, updated_at: now };
 }
 
-function listFor(coll) { return coll === 'files' ? state.docs : coll === 'companies' ? state.companies : coll === 'discover' ? state.discover : coll === 'todos' ? state.todos : state.jobs; }
+function listFor(coll) { return coll === 'notes' ? state.notes : coll === 'files' ? state.docs : coll === 'companies' ? state.companies : coll === 'discover' ? state.discover : coll === 'todos' ? state.todos : state.jobs; }
 const collOf = (kind) => (kind === 'company' ? 'companies' : kind === 'discover' ? 'discover' : 'jobs');
 
 // Apply a change locally right away, then save it. Saves for one job run in order; a failure rolls back.
@@ -1584,6 +1592,7 @@ function celebrate(originEl, big) {
 function jobLabel(job) { return `${readableText(job.title || 'Role')}${job.company ? ` at ${readableText(job.company)}` : ''}`; }
 
 els.jobList.addEventListener('click', (e) => {
+  if (onNoteClick(e)) return;
   if (state.tab === 'resumes' && !state.query && onDocClick(e)) return;
   const hf = e.target.closest('[data-hfilter]');
   if (hf) { state.historyFilter = hf.dataset.hfilter; render(); return; }
@@ -1783,7 +1792,7 @@ const MENU_ICON = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="tru
 function menuButton() {
   return `<button class="btn ghost small menu-btn" data-action="menu" aria-label="More actions" aria-haspopup="menu" title="More actions">${MENU_ICON}</button>`;
 }
-function entryOf(id, kind) { return (kind === 'company' ? state.companies : kind === 'todo' ? state.todos : kind === 'doc' ? state.docs : state.jobs).find((x) => x.id === id); }
+function entryOf(id, kind) { return (kind === 'company' ? state.companies : kind === 'todo' ? state.todos : kind === 'doc' ? state.docs : kind === 'note' ? state.notes : state.jobs).find((x) => x.id === id); }
 
 // Opens next to a button, or at the pointer for a right-click.
 function openRowMenu(id, kind, anchor, point) {
@@ -1883,6 +1892,7 @@ els.rowMenu.addEventListener('click', async (e) => {
   if (!entry) { closeRowMenu(); return; }
   if (kind === 'todo') { todoMenuAction(entry, item); return; }
   if (kind === 'doc') { docMenuAction(entry, item); return; }
+  if (kind === 'note') { noteMenuAction(entry, item); return; }
   if (item.dataset.menu === 'ptop' || item.dataset.menu === 'pbottom') { closeRowMenu(); moveJobToEnd(id, item.dataset.menu === 'ptop'); return; }
   if (item.dataset.menu === 'todo') {
     closeRowMenu();
@@ -1917,7 +1927,7 @@ els.rowMenu.addEventListener('keydown', (e) => {
   items[(i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length].focus();
 });
 document.addEventListener('mousedown', (e) => {
-  if (!els.rowMenu.classList.contains('hidden') && !e.target.closest('#rowMenu, .menu-btn, .own, .tmenu, .hold-pill, .oc-badge, [data-doc-menu]')) closeRowMenu();
+  if (!els.rowMenu.classList.contains('hidden') && !e.target.closest('#rowMenu, .menu-btn, .own, .tmenu, .hold-pill, .oc-badge, [data-doc-menu], #nedMore')) closeRowMenu();
 });
 window.addEventListener('resize', closeRowMenu);
 window.addEventListener('scroll', closeRowMenu, true);
@@ -2870,12 +2880,13 @@ els.rowMenu.addEventListener('change', (e) => {
 
 /* ---------- Keyboard ---------- */
 document.addEventListener('keydown', (e) => {
-  const typing = e.target.closest && e.target.closest('input, textarea');
+  const typing = e.target.closest && e.target.closest('input, textarea, [contenteditable="true"]');
   if (e.key === '/' && !typing && els.blockModal.classList.contains('hidden') && els.companyModal.classList.contains('hidden') && !state.notesJobId && !state.todoOpen) {
     e.preventDefault();
     els.jobUrl.focus();
   } else if (e.key === 'Escape') {
     if (!els.rowMenu.classList.contains('hidden')) closeRowMenu();
+    else if (state.ned) closeNoteEditor();
     else if (state.todoEditing) { /* the edit box handles its own Escape */ }
     else if (state.todoOpen) closeTodos();
     else if (!els.docModal.classList.contains('hidden')) closeDocModal();
@@ -3060,6 +3071,7 @@ function renderFiles(job) {
   const files = jobFiles(job.id);
   const ups = state.uploads.filter((u) => u.job_id === job.id && u.kind === 'attachment');
   els.filesCount.textContent = files.length ? plural(files.length, 'file') : '';
+  renderLinkedNotes(job);
   els.filesList.innerHTML = ups.map(uploadBar).join('') + files.map((d) => `
     <li class="file-item" data-doc-id="${escapeHtml(d.id)}">
       ${fileTile(d, true)}
@@ -3716,6 +3728,630 @@ els.jobList.addEventListener('click', (e) => {
   if (g) { setView(g.dataset.goto); return; }
   const o = e.target.closest('[data-open-doc]');
   if (o) openDoc(o.dataset.openDoc);
+});
+
+
+/* ---------- Notes tab ---------- */
+// Shared notes for both of you: a Keep-style grid or a list, opening into a wide editor.
+// Saves happen as you type and are conflict-safe (see supabase/functions/notes).
+const NOTE_COLORS = ['sand', 'rose', 'peach', 'mint', 'sky', 'lilac'];
+const NOTE_COLOR_NAMES = { sand: 'Sand', rose: 'Rose', peach: 'Peach', mint: 'Mint', sky: 'Sky', lilac: 'Lilac' };
+const NOTE_TEMPLATES = [
+  ['interview', 'Interview prep', 'Interview prep: ', ['Interview prep'], '<h2>The role</h2><p>What they need, in one line:&nbsp;</p><h2>Why me</h2><ul><li><br></li></ul><h2>Stories to tell</h2><ul><li><br></li></ul><h2>Questions to ask them</h2><ul data-type="todo"><li><br></li></ul><h2>Logistics</h2><p>Who, when, format:&nbsp;</p>'],
+  ['star', 'STAR story', 'Story: ', ['Stories'], '<h3>Situation</h3><p><br></p><h3>Task</h3><p><br></p><h3>Action</h3><p><br></p><h3>Result</h3><p>The numbers:&nbsp;</p><h3>Good for questions about</h3><p>Leadership · conflict · ambiguity · impact</p>'],
+  ['research', 'Company research', 'Research: ', ['Research'], '<h2>What they do</h2><p><br></p><h2>Business model and numbers</h2><ul><li><br></li></ul><h2>Recent news</h2><ul><li><br></li></ul><h2>People to know</h2><ul><li><br></li></ul><h2>Why I fit</h2><p><br></p>'],
+  ['coffee', 'Coffee chat', 'Coffee chat: ', ['Coffee chats'], '<p><strong>Who:</strong>&nbsp;</p><p><strong>When:</strong>&nbsp;</p><h2>What I learned</h2><ul><li><br></li></ul><h2>Their advice</h2><ul><li><br></li></ul><h2>Follow-ups</h2><ul data-type="todo"><li>Send a thank-you note</li><li><br></li></ul>'],
+];
+state.notesView = store.get('jobSprintNotesView') === 'list' ? 'list' : 'grid';
+const liveNotes = () => state.notes.filter((n) => !n.deleted_at);
+const trashNotes = () => state.notes.filter((n) => n.deleted_at);
+function noteText(html) {
+  return String(html || '').replace(/<(br|\/p|\/li|\/h2|\/h3|\/blockquote)>/g, '\n').replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+}
+// Same allow-list as the server (supabase/functions/_shared/clean-html.js), used on paste and
+// before anything unsaved is shown. The server cleans again on save; it is the one that counts.
+function cleanNoteHtml(input) {
+  const TAGS = new Set(['p', 'br', 'div', 'h2', 'h3', 'ul', 'ol', 'li', 'strong', 'b', 'em', 'i', 'u', 's', 'a', 'blockquote', 'hr', 'code']);
+  const RENAME = { b: 'strong', i: 'em', div: 'p' };
+  const doc = new DOMParser().parseFromString(`<body>${String(input || '')}</body>`, 'text/html');
+  const out = document.createElement('div');
+  const walk = (from, to) => {
+    from.childNodes.forEach((n) => {
+      if (n.nodeType === 3) { to.append(n.nodeValue); return; }
+      if (n.nodeType !== 1) return;
+      const tag = n.nodeName.toLowerCase();
+      if (['script', 'style', 'iframe', 'object', 'embed', 'template', 'svg', 'math', 'noscript', 'textarea', 'select', 'button', 'head', 'title'].includes(tag)) return;
+      if (!TAGS.has(tag)) { walk(n, to); return; }
+      if (tag === 'a') {
+        const href = (n.getAttribute('href') || '').trim();
+        if (!/^(https?:|mailto:)/i.test(href.replace(/[\u0000- \u007f-\u009f]/g, ''))) { walk(n, to); return; }
+        const a = document.createElement('a'); a.href = href; a.target = '_blank'; a.rel = 'noopener noreferrer'; walk(n, a); to.append(a); return;
+      }
+      const el = document.createElement(RENAME[tag] || tag);
+      if (tag === 'ul' && n.getAttribute('data-type') === 'todo') el.setAttribute('data-type', 'todo');
+      if (tag === 'li' && n.getAttribute('data-checked') === 'true') el.setAttribute('data-checked', 'true');
+      walk(n, el);
+      to.append(el);
+    });
+  };
+  walk(doc.body, out);
+  return out.innerHTML;
+}
+function allNoteLabels() {
+  const m = new Map();
+  liveNotes().forEach((n) => (n.labels || []).forEach((l) => m.set(l, (m.get(l) || 0) + 1)));
+  return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+function noteWho(n) { return n.updated_by || n.created_by || '?'; }
+function noteLinkChip(n) {
+  if (!n.link_kind || !n.link_label) return '';
+  const live = entryOf(n.link_id, n.link_kind === 'company' ? 'company' : 'job');
+  return live
+    ? `<button type="button" class="tchip" data-note-link title="Go to this ${n.link_kind}">${coTile(tagCompany(n.link_label, live), true)}<span class="tchip-text">${escapeHtml(n.link_label)}</span></button>`
+    : `<span class="tchip gone" title="This ${n.link_kind} was removed"><span class="tchip-text">${escapeHtml(n.link_label)}</span></span>`;
+}
+const PIN_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5M9 3h6l-1 6 4 3v2H6v-2l4-3z"/></svg>';
+function noteCard(n) {
+  const title = readableText(n.title || '');
+  const body = n.body ? cleanNoteHtml(n.body) : '';
+  return `<article class="note-card${n.color ? ` nc-${n.color}` : ''}" data-note-id="${escapeHtml(n.id)}" tabindex="0" aria-label="${escapeHtml(title || 'Untitled note')}">
+    <button type="button" class="nc-pin${n.pinned ? ' on' : ''}" data-note-pin aria-pressed="${!!n.pinned}" title="${n.pinned ? 'Unpin' : 'Pin to the top'}">${PIN_ICON}</button>
+    ${title ? `<h4 class="nc-title">${escapeHtml(title)}</h4>` : ''}
+    ${body ? `<div class="nc-body">${body}</div>` : (title ? '' : '<p class="nc-empty">Empty note</p>')}
+    ${(n.labels || []).length || n.link_label ? `<div class="nc-tags">${(n.labels || []).map((l) => `<span class="nlabel">${escapeHtml(l)}</span>`).join('')}${noteLinkChip(n)}</div>` : ''}
+    <div class="nc-foot"><span class="mini-avatar ${userClass(noteWho(n))}">${escapeHtml(noteWho(n)[0])}</span>${relDate(n.updated_at)}</div>
+  </article>`;
+}
+function noteListRow(n) {
+  const title = readableText(n.title || '') || 'Untitled note';
+  const snippet = noteText(n.body).replace(/\s+/g, ' ').trim().slice(0, 160);
+  return `<article class="note-row${n.color ? ` nc-${n.color}` : ''}" data-note-id="${escapeHtml(n.id)}" tabindex="0">
+    <button type="button" class="nc-pin${n.pinned ? ' on' : ''}" data-note-pin aria-pressed="${!!n.pinned}" title="${n.pinned ? 'Unpin' : 'Pin to the top'}">${PIN_ICON}</button>
+    <span class="nr-dot" aria-hidden="true"></span>
+    <div class="nr-text"><span class="nr-title">${escapeHtml(title)}</span><span class="nr-snippet">${escapeHtml(snippet)}</span></div>
+    <div class="nr-tags">${(n.labels || []).slice(0, 3).map((l) => `<span class="nlabel">${escapeHtml(l)}</span>`).join('')}${noteLinkChip(n)}</div>
+    <div class="nr-foot"><span class="mini-avatar ${userClass(noteWho(n))}">${escapeHtml(noteWho(n)[0])}</span>${relDate(n.updated_at)}</div>
+  </article>`;
+}
+function renderNotesTab() {
+  if (!state.notesLoaded) return { html: '<div class="state-card">Loading notes…</div>' };
+  const live = liveNotes();
+  const trash = trashNotes();
+  const f = state.noteFilter;
+  const labels = allNoteLabels();
+  if (f !== 'all' && f !== 'trash' && !labels.some(([l]) => l === f)) state.noteFilter = 'all';
+  const filter = state.noteFilter;
+  const view = state.notesView;
+  const bar = `<div class="notes-bar">
+      <div class="notes-new">
+        <button type="button" class="btn primary small" data-note-new="blank">+ New note</button>
+        <span class="notes-tpl-label">Templates</span>
+        ${NOTE_TEMPLATES.map(([k, name]) => `<button type="button" class="reason-chip" data-note-new="${k}">${name}</button>`).join('')}
+      </div>
+      <div class="view-toggle" role="group" aria-label="Show notes as">
+        <button type="button" class="${view === 'grid' ? 'on' : ''}" data-notes-view="grid" aria-pressed="${view === 'grid'}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>Grid</button>
+        <button type="button" class="${view === 'list' ? 'on' : ''}" data-notes-view="list" aria-pressed="${view === 'list'}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg>List</button>
+      </div>
+    </div>
+    <div class="subfilters notes-filters" role="group" aria-label="Filter notes">
+      <button class="subfilter${filter === 'all' ? ' active' : ''}" data-note-filter="all" aria-pressed="${filter === 'all'}">All <span>${live.length}</span></button>
+      ${labels.map(([l, c]) => `<button class="subfilter${filter === l ? ' active' : ''}" data-note-filter="${escapeHtml(l)}" aria-pressed="${filter === l}">${escapeHtml(l)} <span>${c}</span></button>`).join('')}
+      ${trash.length ? `<button class="subfilter${filter === 'trash' ? ' active' : ''}" data-note-filter="trash" aria-pressed="${filter === 'trash'}">Trash <span>${trash.length}</span></button>` : ''}
+    </div>`;
+  if (filter === 'trash') {
+    const rows = trash.sort((a, b) => new Date(b.deleted_at) - new Date(a.deleted_at)).map((n) => `<article class="note-row trash" data-note-id="${escapeHtml(n.id)}">
+      <div class="nr-text"><span class="nr-title">${escapeHtml(readableText(n.title || '') || 'Untitled note')}</span><span class="nr-snippet">${escapeHtml(noteText(n.body).replace(/\s+/g, ' ').trim().slice(0, 120))}</span></div>
+      <span class="nr-foot">Deleted ${relDate(n.deleted_at)}</span>
+      <div class="actions"><button type="button" class="btn secondary small" data-note-restore>Restore</button><button type="button" class="btn ghost small danger" data-note-purge>Delete forever</button></div>
+    </article>`).join('');
+    return { html: `<div class="notes-tab">${bar}<p class="notes-hint">Notes in Trash are deleted for good after 30 days.</p><div class="note-list">${rows}</div></div>` };
+  }
+  const list = (filter === 'all' ? live : live.filter((n) => (n.labels || []).includes(filter))).sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
+  if (!list.length) {
+    return { html: `<div class="notes-tab">${bar}<div class="notes-empty"><h3>${live.length ? 'No notes with this label' : 'Your shared notes live here'}</h3><p>Interview prep, stories, research, coffee chats. Both of you can see and edit every note.</p><div class="notes-empty-tpl">${NOTE_TEMPLATES.map(([k, name]) => `<button type="button" class="btn secondary small" data-note-new="${k}">${name}</button>`).join('')}</div></div></div>` };
+  }
+  const pinned = list.filter((n) => n.pinned);
+  const others = list.filter((n) => !n.pinned);
+  const block = (notes) => (view === 'grid' ? `<div class="note-grid">${notes.map(noteCard).join('')}</div>` : `<div class="note-list">${notes.map(noteListRow).join('')}</div>`);
+  let html = `<div class="notes-tab">${bar}`;
+  if (pinned.length) html += `<h4 class="notes-sec">Pinned</h4>${block(pinned)}`;
+  if (others.length) html += `${pinned.length ? '<h4 class="notes-sec">Others</h4>' : ''}${block(others)}`;
+  return { html: `${html}</div>` };
+}
+
+async function loadNotes({ silent = false } = {}) {
+  if (state.notesLoading || (state.ned && state.inflight.has(state.ned.id))) return false;
+  state.notesLoading = true;
+  try {
+    const data = await api('notes');
+    const incoming = data.notes || [];
+    // Keep what's open in the editor: unsaved typing stays; if it's untouched and the other
+    // person changed it, show their version.
+    const ned = state.ned;
+    if (ned) {
+      const mine = state.notes.find((n) => n.id === ned.id);
+      const theirs = incoming.find((n) => n.id === ned.id);
+      if (mine && !theirs && ned.creating) incoming.push(mine);
+      else if (theirs && noteDirty() && mine) Object.assign(theirs, { title: mine.title, body: mine.body });
+      else if (theirs && theirs.updated_at !== ned.base && !noteDirty()) { ned.base = theirs.updated_at; fillNoteEditor(theirs, { keepFocus: true }); }
+    }
+    state.notes = incoming;
+    return true;
+  } catch (err) {
+    if (!silent && state.tab === 'notes') showToast(err.message, { error: true });
+    return false;
+  } finally {
+    state.notesLoading = false;
+    state.notesLoaded = true;
+    render();
+  }
+}
+
+// Calls for one note run in order (like mutate) and keep the editor's version stamp current,
+// so your own saves never look like a clash with yourself.
+function noteCall(id, makeBody, method = 'PATCH') {
+  const prev = state.inflight.get(id) || Promise.resolve();
+  const run = prev.catch(() => {}).then(() => api('notes', { method, body: JSON.stringify({ id, actor: state.user, ...makeBody() }) }));
+  state.inflight.set(id, run);
+  run.then((res) => {
+    const n = res && res.note;
+    if (n) {
+      const local = state.notes.find((x) => x.id === id);
+      if (local) Object.assign(local, { ...n, title: noteDirty(id) ? local.title : n.title, body: noteDirty(id) ? local.body : n.body });
+      if (state.ned && state.ned.id === id) state.ned.base = n.updated_at;
+    }
+  }).catch(() => {}).finally(() => { if (state.inflight.get(id) === run) state.inflight.delete(id); });
+  return run;
+}
+function noteDirty(id) { const ned = state.ned; return !!ned && (!id || ned.id === id) && ned.rev !== ned.savedRev; }
+
+function newNote(kind = 'blank', link = null) {
+  if (!state.user) { chooseUser(); return; }
+  const tpl = NOTE_TEMPLATES.find(([k]) => k === kind);
+  const now = new Date().toISOString();
+  const label = state.noteFilter !== 'all' && state.noteFilter !== 'trash' ? [state.noteFilter] : [];
+  const n = {
+    id: newId(), title: tpl ? tpl[2] + (link ? readableText(link.label).split(' · ')[0] : '') : '', body: tpl ? tpl[4] : '', color: null, pinned: false,
+    labels: [...new Set([...(tpl ? tpl[3] : []), ...label])], link_kind: link ? link.kind : null, link_id: link ? link.id : null, link_label: link ? link.label : null,
+    created_by: state.user, created_at: now, updated_by: state.user, updated_at: now, deleted_at: null,
+  };
+  state.notes.unshift(n);
+  render();
+  openNoteEditor(n.id, { creating: true, focus: tpl ? 'title-end' : 'body' });
+  const create = noteCall(n.id, () => ({ title: n.title, body: n.body, labels: n.labels, link_kind: n.link_kind, link_id: n.link_id, link_label: n.link_label }), 'POST');
+  state.ned.creating = create;
+  create.then(() => { if (state.ned && state.ned.id === n.id) state.ned.creating = null; })
+    .catch((err) => { showToast(`Couldn't create the note: ${err.message}`, { error: true }); state.notes = state.notes.filter((x) => x !== n); if (state.ned && state.ned.id === n.id) hideNoteEditor(); render(); });
+}
+
+// ---- editor ----
+function renderNoteColors(n) {
+  els.nedColors.innerHTML = [null, ...NOTE_COLORS].map((c) => `<button type="button" role="radio" class="nsw${c ? ` nc-${c}` : ' none'}${(n.color || null) === c ? ' on' : ''}" data-note-color="${c || ''}" aria-checked="${(n.color || null) === c}" title="${c ? NOTE_COLOR_NAMES[c] : 'No colour'}"></button>`).join('');
+}
+function renderNoteMeta(n) {
+  els.nedLabels.innerHTML = (n.labels || []).map((l) => `<span class="nlabel">${escapeHtml(l)}<button type="button" data-label-x="${escapeHtml(l)}" aria-label="Remove ${escapeHtml(l)}">×</button></span>`).join('');
+  els.nedLabelList.innerHTML = allNoteLabels().map(([l]) => `<option value="${escapeHtml(l)}"></option>`).join('') + NOTE_TEMPLATES.map(([, , , ls]) => ls.map((l) => `<option value="${escapeHtml(l)}"></option>`).join('')).join('');
+  els.nedLink.innerHTML = n.link_label ? `${noteLinkChip(n)}<button type="button" class="ned-unlink" data-note-unlink aria-label="Unlink" title="Unlink">×</button>` : '';
+  els.nedLinkInput.classList.toggle('hidden', !!n.link_label);
+  els.nedPin.setAttribute('aria-pressed', String(!!n.pinned));
+  els.nedPin.classList.toggle('on', !!n.pinned);
+  els.noteEd.className = `drawer note-ed${n.color ? ` nc-${n.color}` : ''}`;
+  renderNoteColors(n);
+  const made = `${n.created_by} · ${relDate(n.created_at)}`;
+  els.nedFoot.innerHTML = `Created by ${escapeHtml(made)}${n.updated_by ? ` · last edit by ${escapeHtml(n.updated_by)}, ${relDate(n.updated_at)}` : ''}`;
+}
+function fillNoteEditor(n, { keepFocus = false } = {}) {
+  const active = document.activeElement;
+  els.nedTitle.value = readableText(n.title || '');
+  els.nedBody.innerHTML = n.body ? cleanNoteHtml(n.body) : '';
+  syncNoteEmpty();
+  renderNoteMeta(n);
+  if (keepFocus && active && els.noteEd.contains(active)) active.focus({ preventScroll: true });
+}
+function syncNoteEmpty() { els.nedBody.classList.toggle('is-empty', !els.nedBody.textContent.trim() && !els.nedBody.querySelector('li, h2, h3, hr')); }
+function setNoteStatus(text, tone = '') { els.nedStatus.textContent = text; els.nedStatus.className = `ned-status ${tone}`; }
+function openNoteEditor(id, { creating = false, focus = 'auto' } = {}) {
+  const n = entryOf(id, 'note');
+  if (!n) return;
+  if (state.ned && state.ned.id !== id) flushNoteSave();
+  if (state.notesJobId) closeNotes();
+  if (state.todoOpen) closeTodos();
+  state.ned = { id, base: n.updated_at, rev: 0, savedRev: 0, timer: null, creating: creating ? true : null };
+  els.nedConflict.classList.add('hidden');
+  fillNoteEditor(n);
+  setNoteStatus(creating ? 'New note' : `Edited ${relDate(n.updated_at)}`);
+  els.noteEdBackdrop.classList.remove('hidden');
+  els.noteEd.classList.remove('hidden');
+  setTimeout(() => {
+    if (focus === 'title-end' || (focus === 'auto' && !n.title)) { els.nedTitle.focus(); els.nedTitle.setSelectionRange(els.nedTitle.value.length, els.nedTitle.value.length); }
+    else if (focus === 'body' || window.matchMedia('(hover: hover)').matches) { els.nedBody.focus(); placeCaretEnd(els.nedBody); }
+  }, 40);
+}
+function placeCaretEnd(el) {
+  const r = document.createRange(); r.selectNodeContents(el); r.collapse(false);
+  const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r);
+}
+function hideNoteEditor() {
+  state.ned = null;
+  els.noteEd.classList.add('hidden');
+  els.noteEdBackdrop.classList.add('hidden');
+  els.nedLinkSuggest.classList.add('hidden');
+}
+function closeNoteEditor() {
+  const ned = state.ned;
+  if (!ned) return;
+  const n = entryOf(ned.id, 'note');
+  flushNoteSave();
+  hideNoteEditor();
+  // A brand-new note you never typed in disappears, like closing an empty note in Keep.
+  if (n && !readableText(n.title || '').trim() && !noteText(n.body).trim() && !(n.labels || []).length && !n.link_id) {
+    state.notes = state.notes.filter((x) => x !== n);
+    noteCall(n.id, () => ({ action: 'delete' })).then(() => noteCall(n.id, () => ({ action: 'purge' }))).catch(() => {});
+  }
+  render();
+}
+// Typing: mark the editor dirty and save shortly after you pause.
+function noteEdited() {
+  const ned = state.ned;
+  if (!ned) return;
+  const n = entryOf(ned.id, 'note');
+  if (!n) return;
+  ned.rev += 1;
+  n.title = els.nedTitle.value;
+  n.body = els.nedBody.innerHTML;
+  n.updated_at = n.updated_at; // unchanged until the server confirms
+  syncNoteEmpty();
+  setNoteStatus('Editing…');
+  clearTimeout(ned.timer);
+  ned.timer = setTimeout(() => saveNote(), 800);
+}
+function saveNote({ force = false } = {}) {
+  const ned = state.ned;
+  if (!ned || (!force && ned.rev === ned.savedRev)) return Promise.resolve();
+  clearTimeout(ned.timer);
+  const id = ned.id;
+  const rev = ned.rev;
+  setNoteStatus('Saving…');
+  const run = noteCall(id, () => {
+    const cur = entryOf(id, 'note');
+    return { action: 'save', base: state.ned && state.ned.id === id ? state.ned.base : cur.updated_at, force, title: cur.title, body: cleanNoteHtml(cur.body) };
+  });
+  return run.then(() => {
+    if (!state.ned || state.ned.id !== id) return;
+    state.ned.savedRev = Math.max(state.ned.savedRev, rev);
+    if (state.ned.rev === state.ned.savedRev) setNoteStatus(`Saved · ${timeOnly(new Date())}`, 'ok');
+    renderNoteMeta(entryOf(id, 'note'));
+    if (state.tab === 'notes' || state.query) render();
+  }).catch((err) => {
+    if (!state.ned || state.ned.id !== id) return;
+    if (/just edited/.test(err.message)) { showNoteConflict(id, err.message); return; }
+    if (/Trash/.test(err.message)) { setNoteStatus('This note was moved to Trash', 'bad'); return; }
+    setNoteStatus('Couldn’t save · retrying', 'bad');
+    clearTimeout(state.ned.timer);
+    state.ned.timer = setTimeout(() => saveNote({ force }), 5000);
+  });
+}
+// When the other person saved first: show it, and let you pick theirs or keep yours.
+async function showNoteConflict(id, message) {
+  let theirs = null;
+  try { theirs = ((await api('notes')).notes || []).find((n) => n.id === id); } catch { /* use the message only */ }
+  if (!state.ned || state.ned.id !== id) return;
+  setNoteStatus('Not saved yet', 'bad');
+  state.ned.theirs = theirs;
+  els.nedConflict.innerHTML = `<span>${escapeHtml(message)} Your changes are still here.</span><button type="button" class="btn secondary small" data-conflict="theirs">Use ${escapeHtml(theirs?.updated_by || 'their')}’s version</button><button type="button" class="btn primary small" data-conflict="mine">Keep mine</button>`;
+  els.nedConflict.classList.remove('hidden');
+}
+els.nedConflict.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-conflict]');
+  const ned = state.ned;
+  if (!b || !ned) return;
+  els.nedConflict.classList.add('hidden');
+  if (b.dataset.conflict === 'mine') { saveNote({ force: true }); return; }
+  const theirs = ned.theirs;
+  const n = entryOf(ned.id, 'note');
+  if (theirs && n) { Object.assign(n, theirs); ned.base = theirs.updated_at; ned.savedRev = ned.rev; fillNoteEditor(n); setNoteStatus(`Showing ${theirs.updated_by}’s version`, 'ok'); render(); }
+});
+function flushNoteSave() { if (noteDirty()) saveNote(); }
+// Leaving the page with unsaved typing: send it with keepalive so it still lands.
+window.addEventListener('pagehide', () => {
+  const ned = state.ned;
+  if (!noteDirty() || !ned) return;
+  const n = entryOf(ned.id, 'note');
+  if (!n) return;
+  try { fetch(`${API_BASE}/notes`, { method: 'PATCH', keepalive: true, headers: { 'Content-Type': 'application/json', apikey: API_KEY }, body: JSON.stringify({ id: n.id, actor: state.user, action: 'save', base: ned.base, title: n.title, body: cleanNoteHtml(n.body) }) }); } catch { /* best effort */ }
+});
+
+els.nedTitle.addEventListener('input', noteEdited);
+els.nedTitle.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); els.nedBody.focus(); placeCaretEnd(els.nedBody); } });
+els.nedBody.addEventListener('input', (e) => {
+  // A new checklist line made with Enter should start unticked.
+  if (e.inputType === 'insertParagraph') {
+    const li = closestInBody(window.getSelection().anchorNode, 'LI');
+    if (li && !li.textContent.trim()) li.removeAttribute('data-checked');
+  }
+  noteEdited();
+});
+function closestInBody(node, name) {
+  while (node && node !== els.nedBody) { if (node.nodeType === 1 && node.nodeName === name) return node; node = node.parentNode; }
+  return null;
+}
+// Lists are built by hand: the browser's own list commands can nest a list inside a paragraph or
+// glue it onto the list above. kind: 'ul' (bullets), 'ol' (numbers) or 'todo' (checklist).
+function makeList(kind, at) {
+  const tag = kind === 'ol' ? 'OL' : 'UL';
+  const isKind = (el) => el && el.nodeName === tag && ((kind === 'todo') === (el.getAttribute('data-type') === 'todo'));
+  const list = closestInBody(at, 'UL') || closestInBody(at, 'OL');
+  if (list) {
+    if (isKind(list)) { // same kind again: turn the list back into plain lines
+      const frag = document.createDocumentFragment();
+      let last = null;
+      [...list.children].forEach((li) => { const pEl = document.createElement('p'); while (li.firstChild) pEl.append(li.firstChild); if (!pEl.textContent) pEl.innerHTML = '<br>'; frag.append(pEl); last = pEl; });
+      list.replaceWith(frag);
+      if (last) placeCaretEnd(last);
+      return;
+    }
+    const next = document.createElement(tag.toLowerCase());
+    if (kind === 'todo') next.setAttribute('data-type', 'todo');
+    while (list.firstChild) { const li = list.firstChild; if (li.nodeType === 1 && kind !== 'todo') li.removeAttribute('data-checked'); next.append(li); }
+    list.replaceWith(next);
+    return;
+  }
+  let block = at;
+  while (block && block.parentNode !== els.nedBody) block = block.parentNode;
+  if (!block) { els.nedBody.innerHTML = '<p><br></p>'; block = els.nedBody.firstChild; }
+  const li = document.createElement('li');
+  if (block.nodeType === 3) li.append(block.cloneNode()); else while (block.firstChild) li.append(block.firstChild);
+  if (!li.textContent) li.innerHTML = '<br>';
+  const prev = block.previousElementSibling;
+  if (isKind(prev)) { prev.append(li); block.remove(); }
+  else { const el = document.createElement(tag.toLowerCase()); if (kind === 'todo') el.setAttribute('data-type', 'todo'); el.append(li); block.replaceWith(el); }
+  placeCaretEnd(li);
+}
+// Keep the body made of real paragraphs, so headings and lists always have a line to work on.
+try { document.execCommand('defaultParagraphSeparator', false, 'p'); } catch { /* older browsers */ }
+els.nedBody.addEventListener('focus', () => {
+  if (!els.nedBody.innerHTML.trim() || els.nedBody.innerHTML === '<br>') { els.nedBody.innerHTML = '<p><br></p>'; placeCaretEnd(els.nedBody.firstChild); }
+});
+// Formatting: toolbar buttons and Notion-style shortcuts ("- ", "1. ", "[] ", "# ", "## ").
+function applyNoteFormat(kind) {
+  els.nedBody.focus();
+  const sel = window.getSelection();
+  const at = sel.rangeCount ? sel.getRangeAt(0).startContainer : null;
+  if (kind === 'bold' || kind === 'italic') document.execCommand(kind);
+  else if (kind === 'h2' || kind === 'h3') {
+    const inIt = closestInBody(at, kind.toUpperCase());
+    document.execCommand('formatBlock', false, inIt ? '<p>' : `<${kind}>`);
+  } else if (kind === 'ul' || kind === 'ol' || kind === 'todo') {
+    makeList(kind, at);
+  } else if (kind === 'link') { startNoteLink(); return; }
+  noteEdited();
+}
+els.noteEd.querySelector('.ned-toolbar').addEventListener('mousedown', (e) => { if (e.target.closest('[data-fmt]')) e.preventDefault(); }); // keep the text selection
+els.noteEd.querySelector('.ned-toolbar').addEventListener('click', (e) => { const b = e.target.closest('[data-fmt]'); if (b) applyNoteFormat(b.dataset.fmt); });
+els.nedBody.addEventListener('keydown', (e) => {
+  if (e.key !== ' ') return;
+  const sel = window.getSelection();
+  if (!sel.rangeCount || !sel.isCollapsed) return;
+  const r = sel.getRangeAt(0);
+  let block = r.startContainer;
+  while (block && block !== els.nedBody && !(block.nodeType === 1 && /^(P|DIV|LI|H2|H3)$/.test(block.nodeName))) block = block.parentNode;
+  if (!block) return;
+  const pre = document.createRange(); pre.selectNodeContents(block); pre.setEnd(r.startContainer, r.startOffset);
+  const map = { '-': 'ul', '*': 'ul', '1.': 'ol', '[]': 'todo', '[ ]': 'todo', '#': 'h2', '##': 'h3' };
+  const kind = map[pre.toString()];
+  if (!kind || (block.nodeName === 'LI' && kind !== 'todo')) return;
+  e.preventDefault();
+  pre.deleteContents();
+  if (!block.textContent && block !== els.nedBody && block.nodeName !== 'LI') block.innerHTML = '<br>';
+  applyNoteFormat(kind);
+});
+els.nedBody.addEventListener('click', (e) => {
+  // Tick a checklist item by clicking its box.
+  const li = e.target.closest && e.target.closest('ul[data-type="todo"] > li');
+  if (li && e.offsetX < 24) {
+    e.preventDefault();
+    if (li.getAttribute('data-checked') === 'true') li.removeAttribute('data-checked'); else li.setAttribute('data-checked', 'true');
+    noteEdited();
+    return;
+  }
+  // Links open with Ctrl/⌘ + click (a plain click just puts the cursor there, so you can edit the text).
+  const a = e.target.closest && e.target.closest('a[href]');
+  if (a && (e.metaKey || e.ctrlKey)) { e.preventDefault(); window.open(a.href, '_blank', 'noopener'); }
+});
+els.nedBody.addEventListener('paste', (e) => {
+  const cd = e.clipboardData;
+  if (!cd) return;
+  e.preventDefault();
+  const html = cd.getData('text/html');
+  const text = cd.getData('text/plain');
+  const sel = window.getSelection();
+  if (!html && /^https?:\/\/\S+$/.test(text.trim()) && sel.rangeCount && !sel.isCollapsed) { document.execCommand('createLink', false, text.trim()); }
+  else if (html) document.execCommand('insertHTML', false, cleanNoteHtml(html));
+  else document.execCommand('insertText', false, text);
+  noteEdited();
+});
+// Link: select some text, click Link, paste the address, press Enter.
+let noteLinkRange = null;
+function startNoteLink() {
+  const sel = window.getSelection();
+  if (!sel.rangeCount || sel.isCollapsed || !els.nedBody.contains(sel.anchorNode)) { setNoteStatus('Select some text first, then click Link', 'bad'); return; }
+  noteLinkRange = sel.getRangeAt(0).cloneRange();
+  const bar = els.noteEd.querySelector('.ned-toolbar');
+  let box = bar.querySelector('.ned-linkbox');
+  if (!box) { box = document.createElement('input'); box.className = 'ned-linkbox'; box.type = 'url'; box.placeholder = 'Paste a link, press Enter'; bar.append(box); }
+  box.value = ''; box.classList.remove('hidden'); box.focus();
+  box.onkeydown = (ev) => {
+    if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); box.classList.add('hidden'); els.nedBody.focus(); return; }
+    if (ev.key !== 'Enter') return;
+    ev.preventDefault();
+    const url = box.value.trim();
+    box.classList.add('hidden');
+    els.nedBody.focus();
+    const s2 = window.getSelection(); s2.removeAllRanges(); s2.addRange(noteLinkRange);
+    if (/^(https?:\/\/|mailto:)/i.test(url)) { document.execCommand('createLink', false, url); noteEdited(); } else if (url) setNoteStatus('Links need to start with https://', 'bad');
+  };
+}
+// Pin, colour, labels, link, delete: small saves with Undo where it matters.
+function updateNoteMeta(id, local, body) {
+  const n = entryOf(id, 'note');
+  if (!n) return;
+  const before = { ...n, labels: [...(n.labels || [])] };
+  Object.assign(n, local);
+  if (state.ned && state.ned.id === id) renderNoteMeta(n);
+  render();
+  return noteCall(id, () => body).catch((err) => {
+    Object.assign(n, before);
+    if (state.ned && state.ned.id === id) renderNoteMeta(n);
+    render();
+    showToast(`Couldn't save: ${err.message}`, { error: true });
+  });
+}
+function toggleNotePin(id) { const n = entryOf(id, 'note'); if (n) updateNoteMeta(id, { pinned: !n.pinned }, { action: 'pin', pinned: !n.pinned }); }
+function deleteNote(id) {
+  const n = entryOf(id, 'note');
+  if (!n) return;
+  if (state.ned && state.ned.id === id) { flushNoteSave(); hideNoteEditor(); }
+  const wasPinned = n.pinned;
+  updateNoteMeta(id, { deleted_at: new Date().toISOString(), pinned: false }, { action: 'delete' });
+  showToast(`Moved to Trash: ${readableText(n.title || '') || 'Untitled note'}`, { undo: () => { updateNoteMeta(id, { deleted_at: null }, { action: 'restore' }); if (wasPinned) toggleNotePin(id); } });
+}
+els.nedPin.addEventListener('click', () => { if (state.ned) toggleNotePin(state.ned.id); });
+els.nedColors.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-note-color]');
+  if (!b || !state.ned) return;
+  const c = b.dataset.noteColor || null;
+  updateNoteMeta(state.ned.id, { color: c }, { action: 'color', color: c });
+});
+function addNoteLabel(raw) {
+  const ned = state.ned; if (!ned) return;
+  const n = entryOf(ned.id, 'note');
+  const l = String(raw || '').replace(/\s+/g, ' ').trim().slice(0, 40);
+  if (!l || (n.labels || []).some((x) => x.toLowerCase() === l.toLowerCase())) return;
+  if ((n.labels || []).length >= 10) { setNoteStatus('Up to 10 labels per note', 'bad'); return; }
+  const labels = [...(n.labels || []), l];
+  updateNoteMeta(n.id, { labels }, { action: 'labels', labels });
+}
+els.nedLabelInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addNoteLabel(els.nedLabelInput.value); els.nedLabelInput.value = ''; }
+  if (e.key === 'Backspace' && !els.nedLabelInput.value && state.ned) {
+    const n = entryOf(state.ned.id, 'note');
+    if ((n.labels || []).length) { const labels = n.labels.slice(0, -1); updateNoteMeta(n.id, { labels }, { action: 'labels', labels }); }
+  }
+});
+els.nedLabelInput.addEventListener('change', () => { if (els.nedLabelInput.value.trim()) { addNoteLabel(els.nedLabelInput.value); els.nedLabelInput.value = ''; } });
+els.nedLabels.addEventListener('click', (e) => {
+  const x = e.target.closest('[data-label-x]');
+  if (!x || !state.ned) return;
+  const n = entryOf(state.ned.id, 'note');
+  const labels = (n.labels || []).filter((l) => l !== x.dataset.labelX);
+  updateNoteMeta(n.id, { labels }, { action: 'labels', labels });
+});
+// Link the note to a job or company (same matching as @ in to-dos).
+let noteLinkPick = { items: [], index: 0 };
+function renderNoteLinkSuggest() {
+  const q = els.nedLinkInput.value.replace(/^@/, '');
+  if (!q.trim()) { els.nedLinkSuggest.classList.add('hidden'); return; }
+  noteLinkPick = { items: tagCandidates(q), index: Math.min(noteLinkPick.index, 5) };
+  if (!noteLinkPick.items.length) { els.nedLinkSuggest.innerHTML = '<li class="tsg-empty">No job or company matches</li>'; els.nedLinkSuggest.classList.remove('hidden'); return; }
+  els.nedLinkSuggest.innerHTML = noteLinkPick.items.map((x, i) => {
+    const e = x.entry;
+    return `<li role="option" class="tsg${i === noteLinkPick.index ? ' on' : ''}" data-link-i="${i}">${coTile((x.kind === 'company' ? e.name : e.company) || '?', true)}<span class="tsg-text"><span class="tsg-main">${x.kind === 'company' ? displayHtml(e.name) : displayHtml(e.title || 'Untitled role')}</span><span class="tsg-sub">${x.kind === 'company' ? 'Tracked company' : `${displayHtml(e.company || '')} · ${STAGE_NAME[stageOf(e)]}`}</span></span></li>`;
+  }).join('');
+  els.nedLinkSuggest.classList.remove('hidden');
+}
+function pickNoteLink(i) {
+  const x = noteLinkPick.items[i];
+  if (!x || !state.ned) return;
+  const link = { link_kind: x.kind, link_id: x.entry.id, link_label: tagLabel(x.entry, x.kind) };
+  els.nedLinkInput.value = '';
+  els.nedLinkSuggest.classList.add('hidden');
+  updateNoteMeta(state.ned.id, link, { action: 'link', ...link });
+}
+els.nedLinkInput.addEventListener('input', () => { noteLinkPick.index = 0; renderNoteLinkSuggest(); });
+els.nedLinkInput.addEventListener('keydown', (e) => {
+  const n = noteLinkPick.items.length;
+  if (els.nedLinkSuggest.classList.contains('hidden')) return;
+  if (e.key === 'ArrowDown' && n) { e.preventDefault(); noteLinkPick.index = (noteLinkPick.index + 1) % n; renderNoteLinkSuggest(); }
+  else if (e.key === 'ArrowUp' && n) { e.preventDefault(); noteLinkPick.index = (noteLinkPick.index - 1 + n) % n; renderNoteLinkSuggest(); }
+  else if (e.key === 'Enter' && n) { e.preventDefault(); pickNoteLink(noteLinkPick.index); }
+  else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); els.nedLinkSuggest.classList.add('hidden'); }
+});
+els.nedLinkSuggest.addEventListener('mousedown', (e) => { const li = e.target.closest('[data-link-i]'); if (li) { e.preventDefault(); pickNoteLink(Number(li.dataset.linkI)); } });
+els.nedLinkInput.addEventListener('blur', () => setTimeout(() => els.nedLinkSuggest.classList.add('hidden'), 150));
+els.nedLink.addEventListener('click', (e) => {
+  if (!state.ned) return;
+  const n = entryOf(state.ned.id, 'note');
+  if (e.target.closest('[data-note-unlink]')) { updateNoteMeta(n.id, { link_kind: null, link_id: null, link_label: null }, { action: 'link', link_kind: null }); return; }
+  if (e.target.closest('[data-note-link]')) { const kind = n.link_kind === 'company' ? 'company' : 'job'; closeNoteEditor(); jumpToRow(n.link_id, kind); }
+});
+els.nedMore.addEventListener('click', () => {
+  if (!state.ned) return;
+  if (!els.rowMenu.classList.contains('hidden') && els.rowMenu.dataset.id === state.ned.id) { closeRowMenu(); return; }
+  showRowMenu(state.ned.id, 'note', '<button role="menuitem" class="menu-item" data-menu="note-copy">Copy as text</button><button role="menuitem" class="menu-item" data-menu="note-dup">Duplicate</button><div class="menu-sep"></div><button role="menuitem" class="menu-item danger" data-menu="note-delete">Move to Trash</button>', els.nedMore);
+});
+async function noteMenuAction(n, item) {
+  const what = item.dataset.menu;
+  closeRowMenu();
+  if (what === 'note-delete') deleteNote(n.id);
+  else if (what === 'note-copy') showToast(await copyText(`${readableText(n.title || '')}\n\n${noteText(n.body).trim()}`.trim()) ? 'Copied the note as text' : 'Couldn’t copy');
+  else if (what === 'note-dup') {
+    flushNoteSave();
+    const copy = { ...n, id: newId(), title: `${readableText(n.title || 'Untitled note')} (copy)`, pinned: false, created_by: state.user, created_at: new Date().toISOString(), updated_by: state.user, updated_at: new Date().toISOString(), deleted_at: null };
+    state.notes.unshift(copy);
+    noteCall(copy.id, () => ({ title: copy.title, body: cleanNoteHtml(copy.body), color: copy.color, labels: copy.labels, link_kind: copy.link_kind, link_id: copy.link_id, link_label: copy.link_label }), 'POST')
+      .then(() => { render(); }).catch((err) => { state.notes = state.notes.filter((x) => x !== copy); render(); showToast(`Couldn't duplicate: ${err.message}`, { error: true }); });
+    openNoteEditor(copy.id);
+  }
+}
+els.nedClose.addEventListener('click', closeNoteEditor);
+els.noteEdBackdrop.addEventListener('click', closeNoteEditor);
+
+// Clicks on notes anywhere in the list area (Notes tab and search results).
+function onNoteClick(e) {
+  if (state.tab !== 'notes' && !state.query) return false;
+  const nv = e.target.closest('[data-notes-view]');
+  if (nv) { state.notesView = nv.dataset.notesView; store.set('jobSprintNotesView', state.notesView); render(); return true; }
+  const nf = e.target.closest('[data-note-filter]');
+  if (nf) { state.noteFilter = nf.dataset.noteFilter; render(); return true; }
+  const nn = e.target.closest('[data-note-new]');
+  if (nn) { newNote(nn.dataset.noteNew); return true; }
+  const host = e.target.closest('[data-note-id]');
+  if (!host) return false;
+  const id = host.dataset.noteId;
+  if (e.target.closest('[data-note-pin]')) { toggleNotePin(id); return true; }
+  if (e.target.closest('[data-note-restore]')) { updateNoteMeta(id, { deleted_at: null }, { action: 'restore' }); showToast('Restored'); return true; }
+  if (e.target.closest('[data-note-purge]')) {
+    const b = e.target.closest('[data-note-purge]');
+    if (!confirmTwice(b, 'Click again')) return true;
+    state.notes = state.notes.filter((x) => x.id !== id); render();
+    noteCall(id, () => ({ action: 'purge' })).catch((err) => showToast(`Couldn't delete: ${err.message}`, { error: true }));
+    return true;
+  }
+  const n = entryOf(id, 'note');
+  if (e.target.closest('[data-note-link]') && n) { jumpToRow(n.link_id, n.link_kind === 'company' ? 'company' : 'job'); return true; }
+  if (host.classList.contains('trash')) return true;
+  openNoteEditor(id);
+  return true;
+}
+els.jobList.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  const card = e.target.closest && e.target.closest('.note-card[data-note-id], .note-row[data-note-id]:not(.trash)');
+  if (card && e.target === card) { e.preventDefault(); openNoteEditor(card.dataset.noteId); }
+});
+// Notes linked to a job show in that job's Notes & files panel.
+function renderLinkedNotes(job) {
+  const linked = liveNotes().filter((n) => n.link_kind === 'job' && n.link_id === job.id);
+  els.linkedNotes.innerHTML = `<div class="ln-head"><span>Notes</span><button type="button" class="btn ghost small" data-ln-new>+ New note for this job</button></div>${linked.map((n) => `<button type="button" class="ln-item${n.color ? ` nc-${n.color}` : ''}" data-ln-open="${escapeHtml(n.id)}"><b>${escapeHtml(readableText(n.title || '') || 'Untitled note')}</b><span>${escapeHtml(noteText(n.body).replace(/\s+/g, ' ').trim().slice(0, 70))}</span></button>`).join('')}`;
+}
+els.linkedNotes.addEventListener('click', (e) => {
+  const open = e.target.closest('[data-ln-open]');
+  if (open) { openNoteEditor(open.dataset.lnOpen); return; }
+  if (e.target.closest('[data-ln-new]')) {
+    const job = entryOf(state.notesJobId, 'job');
+    if (!job) return;
+    newNote('interview', { kind: 'job', id: job.id, label: tagLabel(job, 'job') });
+  }
 });
 
 /* ---------- Colour theme + mode ---------- */
