@@ -4,6 +4,11 @@ Changes to Job Sprint are recorded here. The initial Git snapshot is `v1.0.0`. E
 
 ## Unreleased
 
+### Five new colour themes
+
+- New **Mango**, **Lime**, **Ocean**, **Flamingo** and **Aurora** themes, each with a light and a dark version, plus a soft colour glow behind the page. The older themes are unchanged.
+- The theme picker is now a 3×3 grid with the new themes first. Every text and button colour passes a 4.5:1 contrast check in both modes.
+
 ### Notes tab
 
 - A new **Notes** tab holds notes shared between Garima and Indresh, shown as a **card grid** (Keep style) or a **list**. Switch with Grid/List; the choice is remembered per browser.

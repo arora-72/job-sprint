@@ -4357,6 +4357,11 @@ els.linkedNotes.addEventListener('click', (e) => {
 /* ---------- Colour theme + mode ---------- */
 // Palette (data-palette) and mode (data-theme: light | dark | unset = follow the device) are saved per browser.
 const PALETTES = [
+  { id: 'mango', name: 'Mango', light: ['#FFF8E6', '#FFFFFF', '#FFB020'], dark: ['#151A2E', '#1E243C', '#FFB627'] },
+  { id: 'lime', name: 'Lime', light: ['#F5FAE8', '#FFFFFF', '#8BD11A'], dark: ['#121514', '#1A1F1D', '#A8EA3C'] },
+  { id: 'ocean', name: 'Ocean', light: ['#EEF5FF', '#FFFFFF', '#1E6AE1'], dark: ['#0A1527', '#101F37', '#5AA9FF'] },
+  { id: 'flamingo', name: 'Flamingo', light: ['#FFF1F5', '#FFFFFF', '#D6336C'], dark: ['#21111B', '#2D1725', '#FF6FA5'] },
+  { id: 'aurora', name: 'Aurora', light: ['#F5F4FF', '#FFFFFF', '#A21CAF'], dark: ['#0B0F22', '#141A33', '#E879F9'] },
   { id: 'sunset', name: 'Sunset', light: ['#FFF6EF', '#FFFFFF', '#D2431F'], dark: ['#241B30', '#2F2541', '#FF7A59'] },
   { id: 'lagoon', name: 'Lagoon', light: ['#EEF6F6', '#FFFFFF', '#0A7A6E'], dark: ['#14272E', '#1B343C', '#2DD4BF'] },
   { id: 'grape', name: 'Grape', light: ['#F5F3FF', '#FFFFFF', '#6D4AFF'], dark: ['#1D1934', '#272145', '#9479FF'] },

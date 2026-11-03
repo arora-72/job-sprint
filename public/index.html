@@ -7,13 +7,13 @@
   <meta name="theme-color" content="#F4F2EC" media="(prefers-color-scheme: light)" />
   <meta name="theme-color" content="#0E1015" media="(prefers-color-scheme: dark)" />
   <!-- GitHub Pages cannot send security headers, so the page sets its own rules. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-6LeTA/b9Rk2zcg80gk1fx+YaJv+h+TVb9NXVWIKXbI4='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://tuggvixzrgbqagqrrkey.supabase.co http://localhost:8787; base-uri 'self'; form-action 'self'; object-src 'none'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-nbdMiaQ2lV6w2/uDcgEfXzgPKxKs2W5mHyCeciyax1k='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://tuggvixzrgbqagqrrkey.supabase.co http://localhost:8787; base-uri 'self'; form-action 'self'; object-src 'none'" />
   <meta name="referrer" content="strict-origin-when-cross-origin" />
   <title>Job Sprint</title>
   <script>
     // Apply the saved colour theme and mode before first paint so there is no flash.
     try { var t = localStorage.getItem('jobSprintTheme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}
-    try { var p = localStorage.getItem('jobSprintPalette'); document.documentElement.setAttribute('data-palette', /^(classic|sunset|lagoon|grape)$/.test(p) ? p : 'sunset'); } catch (e) { document.documentElement.setAttribute('data-palette', 'sunset'); }
+    try { var p = localStorage.getItem('jobSprintPalette'); document.documentElement.setAttribute('data-palette', /^(classic|sunset|lagoon|grape|mango|lime|ocean|flamingo|aurora)$/.test(p) ? p : 'sunset'); } catch (e) { document.documentElement.setAttribute('data-palette', 'sunset'); }
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
